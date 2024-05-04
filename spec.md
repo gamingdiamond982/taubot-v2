@@ -79,6 +79,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 | account\_type | Enum        |             |                       |
 | balance\*     | number      |             |                       |
 | economy\_id   | UUID        |             | economies.economy\_id |
+
 \* balance will be stored in cents to avoid floating point arithmetic fuckery, I don't want the hassle supporting balances of arbitrary decimal percision like in V1. To display the balance in tau ensure you do something like this f'{bal//100}.{bal%100}t'
 
 
