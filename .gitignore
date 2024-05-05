@@ -1,3 +1,12 @@
+# Database files
+*.db
+
+# virtual env
+venv/
+
+# All the shit that github gets rid of
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
