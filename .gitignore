@@ -4,6 +4,8 @@
 # config files
 *.json
 
+# vim files
+*.swp
 
 # virtual env
 venv/
