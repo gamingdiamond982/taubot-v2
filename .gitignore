@@ -1,6 +1,10 @@
 # Database files
 *.db
 
+# config files
+*.json
+
+
 # virtual env
 venv/
 
