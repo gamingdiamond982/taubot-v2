@@ -6,11 +6,52 @@ import json
 from backend import Backend
 from typing import Callable
 import datetime
-
+import logging
+import aiohttp
 from discord.ext import tasks, commands
 from discord import app_commands
+from discord import Webhook
 
 import discord
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+discord_logger = logging.getLogger('discord')
+discord_logger.setLevel(logging.DEBUG)
+backend_logger = logging.getLogger('backend')
+backend_logger.setLevel(logging.DEBUG)
+
+stream_handler = logging.StreamHandler()
+
+formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] : %(message)s')
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(formatter)
+
+discord_logger.addHandler(stream_handler)
+backend_logger.addHandler(stream_handler)
+logger.addHandler(stream_handler)
+
+
+class WebhookHandler(logging.Handler):
+	def __init__(self, webhook_url, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self._webhook_url = webhook_url
+
+	async def send(self, *args, **kwargs):
+		async with aiohttp.ClientSession() as session:
+			wh = Webhook.from_url(self._webhook_url, session=session)
+			await wh.send(*args, **kwargs)
+
+	def emit(self, record: logging.LogRecord):
+		embed = discord.Embed(colour=discord.Colour.blue())
+		embed.add_field(name=record.name, value=record.message, inline=False)
+		asyncio.get_event_loop().create_task(self.send(embed=embed))
+
+
+
+
+
 
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
 test_guild = discord.Object(id=1236137485554155612) # Change to None for deployment 
@@ -19,16 +60,23 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 
-tick_time = datetime.time(hour=0, minute=0) # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
+
+tick_time = datetime.time(minute=0) # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
 
 backend = None # Stop any fucky undefined errors
 
 
 
+def create_embed(title, message, colour=None):
+	colour = colour if colour else discord.Colour.blue()
+	embed = discord.Embed(colour=colour)
+	embed.add_field(name=title, value=message)
+	return embed
+	
+
 
 @tasks.loop(time=tick_time)
 async def tick():
-	print("ticking!")
 	backend.tick()
 
 
@@ -46,14 +94,63 @@ async def on_ready():
 
 
 @bot.tree.command(name="ping", description="ping the bot to check if it's online", guild=test_guild)
-async def hello(interaction: discord.Interaction):
+async def ping(interaction: discord.Interaction):
 	await interaction.response.send_message(f'Pong!')
 
+@bot.tree.command(name="create_economy", description="Creates a new economy", guild=test_guild)
+@app_commands.describe(economy_name="The name of the economy")
+@app_commands.describe(currency_unit="The unit of currency to be used in the economy")
+async def create_economy(interaction: discord.Interaction, economy_name: str, currency_unit: str):
+	try:
+		backend.create_economy(interaction.user.id, economy_name, currency_unit)
+		await interaction.response.send_message(embed=create_embed('create-economy', 'Successfully created a new economy'), ephemeral=True)
+	except Exception as e:
+		await interaction.response.send_message(embed=create_embed('create_economy', f'Could not create a new economy : {e}', colour=discord.Colour.red()), ephemeral=True)
+
+@bot.tree.command(name="list_economies", description="lists all of the currently registered economies", guild=test_guild)
+async def list_economies(interaction: discord.Interaction):
+	economies = backend.get_economies()
+	names = '\n'.join([i.currency_name for i in economies])
+	units = '\n'.join([i.currency_unit for i in economies])
+	num_guilds = '\n'.join([str(len(i.guilds)) for i in economies])
+	embed = discord.Embed(colour=discord.Colour.blue())
+	embed.add_field(name='economy name', value=names, inline=True)
+	embed.add_field(name='currency unit', value=units, inline=True)
+	embed.add_field(name='guilds present', value=num_guilds, inline=True)
+	await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name='join_economy', description="registers this guild as a member of a named economy", guild=test_guild)
+@app_commands.describe(economy_name="The name of the economy you want to join")
+async def join_economy(interaction: discord.Interaction, economy_name: str):
+	economy = backend.get_economy_by_name(economy_name)
+	if economy is None:
+		await interaction.response.send_message(embed=create_embed('join_economy', 'That economy could not be found, try creating it with /create_economy', discord.Colour.red()), ephemeral=True)
+		return
+
+	backend.register_guild(interaction.user.id, interaction.guild.id, economy)
+	await interaction.response.send_message(embed=create_embed('join_economy', f'Successfully joined economy: {economy_name}'), ephemeral=True)
+
+@bot.tree.command(name='delete_economy', description="Deletes an economy", guild=test_guild)
+@app_commands.describe(economy_name='The name of the economy')
+async def delete_economy(interaction: discord.Interaction, economy_name: str):
+	economy = backend.get_economy_by_name(economy_name)
+	if economy is None:
+		await interaction.response.send_message(embed=create_embed('delete_economy', 'That economy could not be found double check the name you passed in', discord.Colour.red()), ephemeral=True)
+		return
+
+	try:
+		backend.delete_economy(interaction.user.id, economy)
+		await interaction.response.send_message(embed=create_embed('delete_economy', 'Economy was successfully deleted'), ephemeral=True)
+	except Exception as e:
+		await interaction.response.send_message(embed=create_embed('delete_economy', 'The economy could not be deleted: {e}', discord.Colour.red()), ephemeral=True)
 
 
 
 
-
+def setup_webhook(logger, webhook_url, level):
+	wh = WebhookHandler(webhook_url)
+	wh.setLevel(level)
+	logger.addHandler(wh)
 
 
 
@@ -84,10 +181,20 @@ if __name__ == '__main__':
 
 	token = config.get('discord_token')
 	if not token:
-		print("Discord token not found in the config file")
+		logger.log(logging.CRITICAL, "Discord token not found in the config file")
 		sys.exit(1)
+
+	public_webhook_url = config.get('public_webhook_url')
+	private_webhook_url = config.get('private_webhook_url')
+
+	if public_webhook_url:
+		setup_webhook(backend_logger, public_webhook_url, 52)
+	
+	if private_webhook_url:
+		setup_webhook(backend_logger, private_webhook_url, 51)
+	
 		
-	bot.run(token)
+	bot.run(token, log_handler=None)
 
 	
 
