@@ -222,7 +222,7 @@ class Backend:
 			self.perform_transaction(rec_transfer.authorisor_id, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, transaction_type=rec_transfer.transaction_type)
 			return True
 		except BackendError as e:
-			logger.log(51, f'Failed to perform recurring transaction of {rec_transfer.amount} from {rec_transfer.from_account.account_name} to {rec_transfer.to_account.account_name} due to : {e}'
+			logger.log(51, f'Failed to perform recurring transaction of {rec_transfer.amount} from {rec_transfer.from_account.account_name} to {rec_transfer.to_account.account_name} due to : {e}')
 			return False
 		
 			
