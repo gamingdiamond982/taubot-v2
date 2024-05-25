@@ -2,6 +2,9 @@ import time
 import datetime
 import logging
 
+import discord
+from discord import Member # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
+
 from typing import List
 from typing import Optional
 from typing import Callable
@@ -49,19 +52,22 @@ class Permissions(Enum):
 	"""An Enum that's used to represent different permissions"""
 	# Citizen
 	OPEN_ACCOUNT = 0
-	CLOSE_ACCOUNT = 1
-	TRANSFER_FUNDS = 2 
-	CREATE_RECCURRING_TRANSFER = 3
+	VIEW_BALANCE = 1
+	CLOSE_ACCOUNT = 2
+	TRANSFER_FUNDS = 3 
+	CREATE_RECCURRING_TRANSFER = 4
 
 	# Admin/Developer
-	MANAGE_FUNDS = 3
+	MANAGE_FUNDS = 5
 	
-	CREATE_TAX_BRACKET = 4
-	DELETE_TAX_BRACKET = 5
+	CREATE_TAX_BRACKET = 6
+	DELETE_TAX_BRACKET = 7
 	
-	MANAGE_PERMISSIONS = 6 # The scary one, users with this permission will be able to manage even permissions they do not hold.
-	MANAGE_ECONOMIES = 7
-	OPEN_SPECIAL_ACCOUNT = 8
+	MANAGE_PERMISSIONS = 8 # The scary one, users with this permission will be able to manage even permissions they do not hold.
+	MANAGE_ECONOMIES = 9
+	OPEN_SPECIAL_ACCOUNT = 10
+
+	LOGIN_AS_ACCOUNT = 11
 
 	
 
@@ -74,7 +80,8 @@ DEFAULT_GLOBAL_PERMISSIONS = [
 DEFAULT_OWNER_PERMISSIONS = [
 	Permissions.CLOSE_ACCOUNT,
 	Permissions.TRANSFER_FUNDS,
-	Permissions.CREATE_RECCURRING_TRANSFER
+	Permissions.CREATE_RECCURRING_TRANSFER,
+	Permissions.VIEW_BALANCE,
 ]
 
 
@@ -101,6 +108,7 @@ class Economy(Base):
 	"""A class used to represent an economy stored in the database"""
 	__tablename__ = 'economies'
 	economy_id: Mapped[UUID]  = mapped_column(primary_key=True)
+	owner_guild_id: Mapped[int] = mapped_column(BigInteger(), nullable=False)
 	currency_name: Mapped[str] = mapped_column(String(32), unique=True)
 	currency_unit: Mapped[str] = mapped_column(String(32))
 
@@ -125,7 +133,7 @@ class Account(Base):
 	__tablename__ = 'accounts'
 	account_id: Mapped[UUID] = mapped_column(primary_key=True)
 	account_name: Mapped[str] = mapped_column(String(32))
-	owner_id: Mapped[int] = mapped_column(BigInteger())
+	owner_id: Mapped[int] = mapped_column(BigInteger(), nullable=True)
 	account_type: Mapped[AccountType] = mapped_column()
 	balance: Mapped[int] = mapped_column(default=0)
 	economy_id = mapped_column(ForeignKey("economies.economy_id"))
@@ -139,7 +147,7 @@ class Permission(Base):
 	__tablename__ = 'permissions'
 	entry_id: Mapped[UUID] = mapped_column(primary_key=True)
 	account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True)
-	user_id: Mapped[int] = mapped_column(BigInteger())
+	user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id, due to how discord works there is zero chances of a collision
 	permission: Mapped[Permissions] = mapped_column()
 	allowed: Mapped[bool] = mapped_column()
 	economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id"), nullable=True)
@@ -184,6 +192,15 @@ class BackendError(Exception):
 	pass
 
 
+class StubUser:
+	"""
+	A class to be used if the user could not be found anymore
+	this could be if the user was deleted or if the guild was deleted
+	"""
+	def __init__(self, user_id):
+		self.id = user_id
+		self.roles = []
+
 
 class Backend:
 	"""A singleton used to call the backend database"""
@@ -193,12 +210,12 @@ class Backend:
 		self.session = Session(self.engine)
 		Base.metadata.create_all(self.engine)
 	
-	def create_recurring_transfer(self, user_id: int, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> bool:
-		if not self.has_permission(user_id, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
+	def create_recurring_transfer(self, user: Member, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> bool:
+		if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
 			raise BackendError("You do not have permission to transfer funds on this account")
 		rec_transfer = RecurringTransfer(
 				entry_id = uuid4(),
-				authorisor_id = user_id,
+				authorisor_id = user.id,
 				from_account_id=from_account.account_id,
 				to_account_id = to_account.account_id,
 				amount = amount,
@@ -210,22 +227,15 @@ class Backend:
 
 		self.session.add(rec_transfer)
 		self.session.commit()
-		self.perform_recurring_transfer(rec_transfer)
-
-
-	def perform_recurring_transfer(self, rec_transfer: RecurringTransfer) -> bool:
-		try:
-			self.perform_transaction(rec_transfer.authorisor_id, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, transaction_type=rec_transfer.transaction_type)
-			return True
-		except BackendError as e:
-			logger.log(PRIVATE_LOG, f'Failed to perform recurring transaction of {rec_transfer.amount} from {rec_transfer.from_account.account_name} to {rec_transfer.to_account.account_name} due to : {e}')
-			return False
-		
+		self.perform_transaction(user, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, rec_transfer.transaction_type)
+	
 			
 	
-	def tick(self):
-		"""Triggers a tick in the server should be called externally"""
-		# TODO: implement a callbacks system that dms users whenever their transactions have terminated for unexpected reasons
+	async def tick(self, bot):
+		"""
+		Triggers a tick in the server should be called externally
+		Must be triggered externally 		
+		"""
 		tick_time = time.time()
 		stmt = select(RecurringTransfer).where((RecurringTransfer.last_payment_timestamp + RecurringTransfer.payment_interval) <= tick_time)
 		transfers = self.session.execute(stmt).all()
@@ -237,11 +247,23 @@ class Backend:
 				if payments_left == 0:
 					self.session.delete(transfer)
 					break
-				if not self.perform_recurring_transfer(transfer):
-					# The user no longer has permission to perform the transfer or sufficient funds to do so, so it should be deleted
+				
+				try:
+					guild = await bot.fetch_guild(transfer.from_account.economy.owner_guild_id)
+					authorisor = await guild.fetch_member(transfer.authorisor_id) if guild is not None else None
+					if authorisor is None:
+						authorisor = StubUser(transfer.authorisor_id)
+					self.perform_transaction(authorisor, transfer.from_account, transfer.to_account, transfer.amount, transfer.transaction_type)
+					payments_left -= 1
+				except BackendError as e:
+					logger.log(PRIVATE_LOG, f'Failed to perform recurring transaction of {transfer.amount} from {transfer.from_account.account_name} to {transfer.to_account.account_name} due to : {e}')
+					user = await bot.fetch_user(transfer.authorisor_id)
+					if user is not None:
+						dms = user.dm_channel if user.dm_channel else await user.create_dm()
+						embed = discord.Embed(discord.Colour.red())
+						embed.add_field("Recurring Transaction Failed!", "Your recurring transaction of {transfer.amount} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}")
+						dms.send(embed=embed)
 					self.session.delete(transfer)
-					break
-				payments_left -= 1
 			else: # for those unfamiliar with for/else this is not executed if the loop breaks
 				transfer.number_of_payments_left = payments_left
 				transfer.last_payment_timestamp = tick_time
@@ -253,17 +275,17 @@ class Backend:
 		res = self.session.execute(stmt).one_or_none()
 		return res if res is None else res[0]
 
-	def has_permission(self, user_id: int, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
+	def has_permission(self, user: Member, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
 		"""
 		Checks if a user is allowed to do something
 		"""
-		if user_id == CONSOLE_USER_ID:
+		if user.id == CONSOLE_USER_ID:
 			return True
 
 		if account is not None and economy is None:
 			economy = account.economy
 
-		stmt = select(Permission).where(Permission.user_id == user_id).where(Permission.permission == permission)
+		stmt = select(Permission).where(Permission.user_id.in_([user.id] + [r.id for r in user.roles])).where(Permission.permission == permission)
 		stmt = stmt.where((Permission.account_id == (account.account_id if account is not None else None)) | (Permission.account_id == None))
 		stmt = stmt.where((Permission.economy_id == (economy.economy_id if economy is not None else None)) | (Permission.economy_id == None))
 		default = False
@@ -271,7 +293,7 @@ class Backend:
 
 		if permission in DEFAULT_GLOBAL_PERMISSIONS:
 			default = True
-		elif permission in DEFAULT_OWNER_PERMISSIONS and user_id == owner_id:
+		elif permission in DEFAULT_OWNER_PERMISSIONS and user.id == owner_id:
 			default = True
 		
 		
@@ -280,22 +302,34 @@ class Backend:
 		if len(result) == 0:
 			return default
 
+
 		def evaluate(perm):
 			# Precedence for result : 
 			# 1. account & economy are null
 			# 2. account is null
 			# 3. account & economy are not null
 			# Economy cannot be null without account being null
-			perm = perm[0]
 			if perm.account_id is None and perm.economy_id is None:
 				return 1
 			if perm.account_id is None:
 				return 2
 			return 3
-		result.sort(key=evaluate)
+
+		best = result.pop(0)[0]
+		for r in result:
+			r = r[0]
+			if evaluate(best) > evaluate(r):
+				best = r
+				continue
+			if evaluate(best) == evaluate(r):
+				if best.user_id == user.id:
+					continue
+				elif r.user_id == user.id:
+					best = r
+				elif user.guild.get_role(best.user_id) < user.guild.get_role(r.user_id):
+					best = r
 		
-		
-		return result[0][0].allowed
+		return best.allowed
 
 		
 	def _reset_permission(self, user_id, permission, account, economy):
@@ -319,43 +353,47 @@ class Backend:
 		self.session.add(permission)
 
 	
-	def reset_permission(self, actor_id:int, user_id:int, permission:Permissions, account: Account = None, economy: Economy = None):
-		if not self.has_permission(actor_id, Permissions.MANAGE_PERMISSIONS,  economy=economy):
+	def reset_permission(self, actor: Member, affected_id:int, permission:Permissions, account: Account = None, economy: Economy = None):
+		if not self.has_permission(actor, Permissions.MANAGE_PERMISSIONS,  economy=economy):
 			raise BackendError("You do not have permission to manage permissions here")
 
-		self._reset_permission(user_id, permission, account, economy)
+		self._reset_permission(affected_id, permission, account, economy)
 		self.session.commit()
 
 
-	def change_permissions(self, actor_id: int, user_id: int, permission: Permissions, account: Account = None, economy: Economy = None, allowed: bool = True):
-		if not self.has_permission(actor_id, Permissions.MANAGE_PERMISSIONS, economy=economy):
+	def change_permissions(self, actor: Member, affected_id: int, permission: Permissions, account: Account = None, economy: Economy = None, allowed: bool = True):
+		if not self.has_permission(actor, Permissions.MANAGE_PERMISSIONS, economy=economy):
 			raise BackendError("You do not have permission to manage permissions here")
-		self._change_permission(user_id, permission, account, economy, allowed)
+		self._change_permission(affected_id, permission, account, economy, allowed)
 		self.session.commit()
 
-	def change_many_permissions(self, actor_id, user_id, *permissions, account: Account = None, economy: Economy = None, allowed: bool = True):
-		if not self.has_permission(actor_id, Permissions.MANAGE_PERMISSIONS, economy=economy):
+	def change_many_permissions(self, actor: Member, affected_id: int, *permissions, account: Account = None, economy: Economy = None, allowed: bool = True):
+		if not self.has_permission(actor, Permissions.MANAGE_PERMISSIONS, economy=economy):
 			raise BackendError("You do not have permission to manage permissions here")
 		for permission in permissions:
-			self._change_permission(user_id, permission, account, economy, allowed)
+			self._change_permission(affected_id, permission, account, economy, allowed)
 		self.session.commit()
-		return True
 
 	def get_economies(self):
 		return [i[0] for i in self.session.execute(select(Economy)).all()]
 
-	def create_economy(self, user_id: int, currency_name: str, currency_unit: str) -> Economy:
-		if not self.has_permission(user_id, Permissions.MANAGE_ECONOMIES):
+	def create_economy(self, user: Member, currency_name: str, currency_unit: str) -> Economy:
+		if not self.has_permission(user, Permissions.MANAGE_ECONOMIES):
 			raise BackendError("You do not have permission to create economies")
 		
 		if self.get_economy_by_name(currency_name):
 			raise BackendError("An economy by that name already exists")
 
-		economy = Economy(economy_id=uuid4(), currency_name=currency_name, currency_unit=currency_unit)	
+		economy = Economy(economy_id=uuid4(), currency_name=currency_name, currency_unit=currency_unit, owner_guild_id = user.guild.id)
+		
+		if self.get_guild_economy(user.guild.id) is not None:
+			raise BackendError("This guild is already registered to an economy")
+
+		self.session.add(Guild(guild_id=user.guild.id, economy_id=economy.economy_id))
 		self.session.add(economy)
-		self.change_many_permissions(0, user_id, *[i for i in Permissions], economy=economy)
+		self.change_many_permissions(StubUser(0), user.id, *Permissions, economy=economy)
 		self.session.commit()
-		logger.log(PUBLIC_LOG, f'<@{user_id}> created the economy {currency_name}')
+		logger.log(PUBLIC_LOG, f'{user.mention} created the economy {currency_name}')
 		return economy
 
 
@@ -363,21 +401,23 @@ class Backend:
 		return self._one_or_none(select(Economy).where(Economy.currency_name == name))
 		
 
-	def register_guild(self, user_id: int, guild_id: int, economy: Economy) -> bool:
-		if not self.has_permission(user_id, Permissions.MANAGE_ECONOMIES, economy=economy):
+	def register_guild(self, user: Member, guild_id: int, economy: Economy):
+		if not self.has_permission(user, Permissions.MANAGE_ECONOMIES, economy=economy):
 			raise BackendError("You do not have permission to manage economies")
 
 		if self._one_or_none(select(Guild).where(Guild.guild_id == guild_id)) is not None:
-			self.unregister_guild(user_id, guild_id)
+			self.unregister_guild(user, guild_id)
 		guild = Guild(guild_id=guild_id, economy_id=economy.economy_id)
 		self.session.add(guild)
-		logger.log(PUBLIC_LOG, f'<@{user_id}> registered the guild with id: {guild_id} to the economy {economy.currency_name}')
+		logger.log(PUBLIC_LOG, f'{user.mention} registered the guild with id: {guild_id} to the economy {economy.currency_name}')
 		self.session.commit()
 	
-	def unregister_guild(self, user_id: int, guild_id:int) -> bool:
-		if not self.has_permission(user_id, Permissions.MANAGE_ECONOMIES, economy=self.get_guild_economy(guild_id)):
+	def unregister_guild(self, user: Member, guild_id:int):
+		if not self.has_permission(user, Permissions.MANAGE_ECONOMIES, economy=self.get_guild_economy(guild_id)):
 			raise BackendError("You do not have permission to manage economies")
-
+		
+		if len(self.session.execute(select(Economy).where(Economy.owner_guild_id == guild_id)).all()) != 0:
+			raise BackendError("This guild is the owner guild of an economy, cannot change the economy its registered too")
 		guild = self.session.get(Guild, guild_id)
 		self.session.delete(guild)
 		self.session.commit()
@@ -390,14 +430,16 @@ class Backend:
 	def get_guild_ids(self, economy: Economy) -> List[int]:
 		return [i.guild_id for i in economy.guilds]
 
-	def delete_economy(self, user_id: int, economy: Economy) -> bool:
-		if not self.has_permission(user_id, Permissions.MANAGE_ECONOMIES, economy=economy):
+	def delete_economy(self, user: Member, economy: Economy) -> bool:
+		if not self.has_permission(user, Permissions.MANAGE_ECONOMIES, economy=economy):
 			raise BackendError("You do not have permission to delete this economy")
+		self.session.execute(delete(Guild).where(Guild.economy_id == economy.economy_id))
+		
 		self.session.delete(economy)
 		self.session.commit()
 
-	def create_account(self, authorisor_id: int, owner_id: int, economy: Economy, name: str=None, account_type: AccountType=AccountType.USER) -> Account:
-		if not self.has_permission(authorisor_id, Permissions.OPEN_ACCOUNT, economy=economy):
+	def create_account(self, authorisor: Member, owner_id: int, economy: Economy, name: str=None, account_type: AccountType=AccountType.USER) -> Account:
+		if not self.has_permission(authorisor, Permissions.OPEN_ACCOUNT, economy=economy):
 			raise BackendError("You do not have permissions to open accounts")
 
 		name = name if name is not None else f"<@!{owner_id}> 's account"
@@ -413,23 +455,29 @@ class Backend:
 		self.session.commit()
 		return account
 
-	def delete_account(self, authorisor_id: int, account):
-		if not self.has_permission(authorisor_id, Permissions.CLOSE_ACCOUNT, account=account, economy=account.economy):
+	def delete_account(self, authorisor: Member, account):
+		if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account, economy=account.economy):
 			raise BackendError("You do not have permission to close this account")
 		self.session.delete(account)
 		self.session.commit()
 
-	def get_user_account(self, user_id: int, economy):
+	def get_user_account(self, user_id: int, economy: Economy) -> Account | None:
 		return self._one_or_none(select(Account).where(Account.owner_id == user_id).where(Account.account_type == AccountType.USER).where(Account.economy_id == economy.economy_id))
+
+	def get_account_by_name(self, account_name: str, economy: Economy) -> Account | None:
+		return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id))
 
 	def perform_transaction_tax(self, amount: int, transaction_type: TransactionType) -> int:
 		"""Performs taxation and returns the total amount of tax taken"""
 		return 0 # TODO: make this actually do something
 	
-	def perform_transaction(self, user_id: int, from_account: Account, to_account: Account, amount: int, transaction_type: TransactionType = TransactionType.PERSONAL):
+	def perform_transaction(self, user: Member, from_account: Account, to_account: Account, amount: int, transaction_type: TransactionType = TransactionType.PERSONAL):
 		"""Performs a transaction from one account to another accounting for tax, returns a boolean indicating if the transaction was successful"""
-		if not self.has_permission(user_id, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
+		if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
 			raise BackendError("You do not have permission to transfer funds from that account")
+
+		if from_account.economy_id != to_account.economy_id:
+			raise BackendError("Cannot transfer funds from one economy to another")
 
 		if from_account.balance < amount:
 			raise BackendError("You do not have sufficient funds to transfer from that account")
@@ -438,14 +486,14 @@ class Backend:
 		to_account.balance += amount
 		self.session.commit()
 
-	def print_money(self, user_id: int, to_account: Account, amount: int):
-		if not self.has_permission(user_id, Permissions.MANAGE_FUNDS, account=to_account, economy=to_account.economy):
+	def print_money(self, user: Member, to_account: Account, amount: int):
+		if not self.has_permission(user, Permissions.MANAGE_FUNDS, account=to_account, economy=to_account.economy):
 			raise BackendError("You do not have permission to print funds")
 		to_account.balance += amount
 		self.session.commit()
 
-	def remove_funds(self, user_id: int, from_account: Account, amount: int):
-		if not self.has_permission(user_id, Permissions.MANAGE_FUNDS, account=from_account, economy=from_account.economy):
+	def remove_funds(self, user: Member, from_account: Account, amount: int):
+		if not self.has_permission(user, Permissions.MANAGE_FUNDS, account=from_account, economy=from_account.economy):
 			raise BackendError("You do not have permission to remove funds")
 		if from_account.balance < amount:
 			raise BackendError("There are not sufficient funds in this account to perform this action")
