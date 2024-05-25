@@ -3,16 +3,25 @@ import asyncio
 import time
 import sys
 import json
-from backend import Backend
+from backend import Backend, BackendError, Account
 from typing import Callable
 import datetime
 import logging
 import aiohttp
+import re
+
+from typing import Union
+
 from discord.ext import tasks, commands
 from discord import app_commands
 from discord import Webhook
 
 import discord
+
+
+discord_id_regex = re.compile('\A<@!?\d*>\Z') # a regex that matches a discord id
+id_extractor = re.compile('[<@!>]*')
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -60,8 +69,11 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 
+login_map: dict[int, Account] = {}
 
-tick_time = datetime.time(minute=0) # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
+
+
+tick_time = datetime.time(hour=0, minute=0) # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
 
 backend = None # Stop any fucky undefined errors
 
@@ -144,6 +156,27 @@ async def delete_economy(interaction: discord.Interaction, economy_name: str):
 	except Exception as e:
 		await interaction.response.send_message(embed=create_embed('delete_economy', 'The economy could not be deleted: {e}', discord.Colour.red()), ephemeral=True)
 
+@bot.tree.command(name='open_account', description="opens a user account in this guild's economy", guild=test_guild)
+async def create_account(interaction: discord.Interaction):
+	economy = backend.get_guild_economy(interaction.guild.id)
+	try:
+		backend.create_account(interaction.user.id, interaction.user.id, economy)
+		await interaction.response.send_message(embed=create_embed('open_account', 'Your account was opened succesfully'), ephemeral=True)
+	except BackendError as e:
+		await interaction.response.send_message(embed=create_embed('open_account', f'The account could not be opened: {e}', discord.Colour.red()), ephemeral=True)
+
+@bot.tree.command(name='login', description="login to an account that is not your's in order to act as your behalf", guild=test_guild)
+@app_commands.describe(account_name="The account to login as")
+async def login(interaction: discord.Interaction, account_name: str):
+	account_name = account_name.strip()
+	economy = backend.get_guild_economy(interaction.guild.id)
+	if discord_id_regex.match(account_name):
+		account = backend.get_user_account(int(id_extractor.sub('', account_name)), economy)
+	else:
+		account = backend.get_account_by_name(account_name, economy)
+
+	if account is None:
+		await interaction.response.send_message(embed=create_embed('login', f'We could not find any account under the name : {account_name}', discord.Colour.orange(), ephemeral=True)
 
 
 
