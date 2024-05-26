@@ -249,7 +249,37 @@ class BackendTests(unittest.TestCase):
 		self.assertEqual(backend.get_user_account(user_id, econ).balance, 900)
 
 	def test_taxes(self):
-		pass
+		backend = create_test_backend()
+		econ = backend.create_economy(admin, 'tau', 't')
+		gov = backend.create_account(admin, admin.id, econ, 'government', AccountType.GOVERNMENT)
+		test_tax = backend.create_tax_bracket(admin, 'test_tax_1', AccountType.USER, TaxType.WEALTH, 1000, 2000, 10, gov)
+		
+		backend.perform_tax(admin, econ)
+
+		user = add_member(user_id)
+		test_acc = backend.create_account(user, user_id, econ)
+		backend.print_money(admin, test_acc, 2000)
+		backend.perform_tax(admin, econ)
+
+		self.assertEqual(backend.get_user_account(user_id, econ).balance, 1900)
+
+		self.assertEqual(gov.balance, 100)
+		backend.perform_tax(admin, econ)
+
+		self.assertEqual(backend.get_user_account(user_id, econ).balance, 1810)
+
+		self.assertEqual(gov.balance, 190)
+
+
+		backend.delete_tax_bracket(admin, 'test_tax_1', econ)
+
+
+		test_tax = backend.create_tax_bracket(admin, 'test_tax_2', AccountType.USER, TaxType.INCOME, 1000, 2000, 10, gov)
+		
+		other_user = add_member(other_user_id)
+#		test_acc_2 = backend.create_account(other_user, other_user_id, 
+
+		
 
 
 

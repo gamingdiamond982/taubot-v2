@@ -11,10 +11,11 @@ from typing import Callable
 
 from enum import Enum
 from uuid import UUID, uuid4
+from sqlalchemy import func
 
 from sqlalchemy import String, BigInteger, Date
 from sqlalchemy import create_engine
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped
@@ -60,14 +61,15 @@ class Permissions(Enum):
 	# Admin/Developer
 	MANAGE_FUNDS = 5
 	
-	CREATE_TAX_BRACKET = 6
-	DELETE_TAX_BRACKET = 7
+	MANAGE_TAX_BRACKETS = 6
 	
-	MANAGE_PERMISSIONS = 8 # The scary one, users with this permission will be able to manage even permissions they do not hold.
-	MANAGE_ECONOMIES = 9
-	OPEN_SPECIAL_ACCOUNT = 10
+	MANAGE_PERMISSIONS = 7 # The scary one, users with this permission will be able to manage even permissions they do not hold.
+	MANAGE_ECONOMIES = 8
+	OPEN_SPECIAL_ACCOUNT = 9
 
-	LOGIN_AS_ACCOUNT = 11
+	LOGIN_AS_ACCOUNT = 10
+
+	GOVERNMENT_OFFICIAL = 11
 
 	
 
@@ -82,6 +84,7 @@ DEFAULT_OWNER_PERMISSIONS = [
 	Permissions.TRANSFER_FUNDS,
 	Permissions.CREATE_RECCURRING_TRANSFER,
 	Permissions.VIEW_BALANCE,
+	Permissions.LOGIN_AS_ACCOUNT
 ]
 
 
@@ -92,7 +95,6 @@ class TaxType(Enum):
 	WEALTH = 0
 	INCOME = 1
 	VAT = 2
-	GIFT = 3
 
 class TransactionType(Enum):
 	"""An Enum used to represent different types of transactions"""
@@ -108,6 +110,8 @@ class Economy(Base):
 	"""A class used to represent an economy stored in the database"""
 	__tablename__ = 'economies'
 	economy_id: Mapped[UUID]  = mapped_column(primary_key=True)
+#	tax_period: Mapped[int] = mapped_column(default=60*60*24*7)
+#	last_tax_timestamp: Mapped[int] = mapped_column()
 	owner_guild_id: Mapped[int] = mapped_column(BigInteger(), nullable=False)
 	currency_name: Mapped[str] = mapped_column(String(32), unique=True)
 	currency_unit: Mapped[str] = mapped_column(String(32))
@@ -136,6 +140,7 @@ class Account(Base):
 	owner_id: Mapped[int] = mapped_column(BigInteger(), nullable=True)
 	account_type: Mapped[AccountType] = mapped_column()
 	balance: Mapped[int] = mapped_column(default=0)
+	income_to_date: Mapped[int] = mapped_column(default=0)
 	economy_id = mapped_column(ForeignKey("economies.economy_id"))
 	
 	economy: Mapped[Economy] = relationship(back_populates="accounts")
@@ -159,13 +164,16 @@ class Tax(Base):
 	"""A class used to represent a tax bracket stored in the database"""
 	__tablename__ = 'taxes'
 	entry_id: Mapped[UUID] = mapped_column(primary_key=True)
+	tax_name: Mapped[str] = mapped_column(String(32))
 	affected_type: Mapped[AccountType] = mapped_column()
 	tax_type: Mapped[TaxType] = mapped_column()
 	bracket_start: Mapped[int] = mapped_column()
 	bracket_end: Mapped[int] = mapped_column()
 	rate: Mapped[int] = mapped_column()
 	to_account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.account_id"))
+	economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id"))
 	to_account: Mapped[Account] = relationship()
+	economy: Mapped[Economy] = relationship()
 
 
 class RecurringTransfer(Base):
@@ -199,6 +207,7 @@ class StubUser:
 	"""
 	def __init__(self, user_id):
 		self.id = user_id
+		self.mention = f"<@{user_id}>"
 		self.roles = []
 
 
@@ -209,6 +218,162 @@ class Backend:
 		self.engine = create_engine(path)
 		self.session = Session(self.engine)
 		Base.metadata.create_all(self.engine)
+
+
+
+	def get_tax_bracket(self, tax_name, economy):
+		return self._one_or_none(select(Tax).where(Tax.tax_name==tax_name).where(Tax.economy_id == economy.economy_id))
+
+
+	def get_tax_brackets(self, economy):
+		return self.session.execute(select(Tax).where(Tax.economy_id == economy.economy_id)).all()
+
+
+	def create_tax_bracket(self, user: Member, tax_name: str, affected_type: AccountType, tax_type: TaxType, bracket_start: int, bracket_end: int, rate: int, to_account: Account):
+		if not self.has_permission(user, Permissions.MANAGE_TAX_BRACKETS, economy=to_account.economy):
+			raise BackendError("You do not have permission to create tax brackets in this economy")
+
+		if self.get_tax_bracket(tax_name, to_account.economy) is not None:
+			raise BackendError("A tax bracket of that name already exists in this economy")
+		tax_bracket = Tax(
+			entry_id = uuid4(),
+			tax_name=tax_name,
+			affected_type = affected_type,
+			tax_type = tax_type,
+			bracket_start = bracket_start,
+			bracket_end = bracket_end,
+			rate = rate,
+			to_account_id = to_account.account_id,
+			economy_id = to_account.economy.economy_id
+		)
+		self.session.add(tax_bracket)
+		self.session.commit()
+		logger.log(PUBLIC_LOG, f"{user.mention} created a new tax bracket by the name {tax_name}")
+		return tax_bracket
+
+
+
+
+	def delete_tax_bracket(self, user: Member, tax_name: str, economy: Economy):
+		if not self.has_permission(user, Permissions.MANAGE_TAX_BRACKETS, economy=economy):
+			raise BackendError("You do not have permission to create tax brackets in this economy")
+
+		tax_bracket = self.get_tax_bracket(tax_name, economy)
+		if tax_bracket is None:
+			raise BackendError("No tax bracket of that name exists in this economy")
+
+		self.session.delete(tax_bracket)
+		self.session.commit()
+		logger.log(PUBLIC_LOG, f"{user.mention} deleted the tax bracket {tax_name}")
+
+
+	def _perform_transaction_tax(self, amount: int, transaction_type: TransactionType, economy: Economy) -> int:
+		"""Performs taxation and returns the total amount of tax taken"""
+		if transaction_type == TransactionType.PURCHASE:
+			vat_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.VAT).where(Tax.economy_id==economy.economy_id).order_by(Tax.bracket_start.desc())).all()
+			total_cum_tax = 0
+			for vat_tax in vat_taxes:
+				vat_tax = vat_tax[0]
+				
+				accumulated_tax = 0
+
+				full_tax = ((vat_tax.bracket_end - vat_tax.bracket_start)*vat_tax.rate)//100
+				if amount >= vat_tax.bracket_end:
+					accumulated_tax += full_tax
+				else:
+					accumulated_tax += ((amount - vat_tax.bracket_start)*vat_tax.rate)//100
+				amount -= accumulated_tax
+				vat_tax.to_account.balance += accumulated_tax
+				total_cum_tax += accumulated_tax
+			return total_cum_tax
+		return 0
+
+
+	def perform_tax(self, user:Member, economy: Economy):
+		if not self.has_permission(user, Permissions.MANAGE_TAX_BRACKETS, economy=economy):
+			raise BackendError("You do not have permission to trigger taxes in this economy")
+		
+		wealth_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.WEALTH).where(Tax.economy_id==economy.economy_id).order_by(Tax.bracket_start.desc())).all()
+		
+		for wealth_tax in wealth_taxes:
+			wealth_tax = wealth_tax[0]
+			
+			accumulated_tax = 0
+			full_tax = ((wealth_tax.bracket_end - wealth_tax.bracket_start)*wealth_tax.rate)//100
+
+			accum = self._one_or_none(
+								select(func.sum(((Account.balance-wealth_tax.bracket_start)*wealth_tax.rate)//100))
+								.select_from(Account)
+								.where(Account.account_type==wealth_tax.affected_type)
+								.where(Account.balance >= wealth_tax.bracket_start)
+								.where(Account.balance < wealth_tax.bracket_end))
+
+			accumulated_tax += accum if accum is not None else 0
+			self.session.execute(update(Account)
+				.where(Account.account_type == wealth_tax.affected_type)
+				.where(Account.balance >= wealth_tax.bracket_start)
+				.where(Account.balance < wealth_tax.bracket_end)
+				.values(balance=Account.balance-(((Account.balance-wealth_tax.bracket_start)*wealth_tax.rate)//100))
+			)
+
+			accum = self._one_or_none(select(func.count()).select_from(Account).where(Account.account_type == wealth_tax.affected_type).where(Account.balance >= wealth_tax.bracket_end))
+			accumulated_tax += (accum if accum is not None else 0)*full_tax
+			self.session.execute(update(Account).where(Account.account_type == wealth_tax.affected_type).where(Account.balance >= wealth_tax.bracket_end).values(balance=(Account.balance - full_tax)))
+			wealth_tax.to_account.balance += accumulated_tax
+
+		income_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.INCOME).where(Tax.economy_id == economy.economy_id).order_by(Tax.bracket_start.desc())).all()
+
+		for income_tax in income_taxes:
+			income_tax = income_tax[0]
+			
+			accumulated_tax = 0
+
+			full_tax = ((income_tax.bracket_end - income_tax.bracket_start)*income_tax.rate)//100
+			accum = self._one_or_none(
+						select(func.sum(((Account.income_to_date-income_tax.bracket_start)*income_tax.rate)//100))
+						.select_from(Account)
+						.where(Account.account_type == income_tax.affected_type)
+						.where(Account.income_to_date >= income_tax.bracket_start)
+						.where(Account.income_to_date < income_tax.bracket_end)
+			)
+
+			self.session.execute(
+						update(Account)
+						.where(Account.account_type == income_tax.affected_type)
+						.where(Account.income_to_date >= income_tax.bracket_start)
+						.where(Account.income_to_date < income_tax.bracket_end)
+						.values(balance=((Account.income_to_date-income_tax.bracket_start)*income_tax.rate)//100)
+			)
+			
+			accumulated_tax += accum if accum is not None else 0
+			
+			accum = self._one_or_none(select(func.count()).select_from(Account).where(Account.account_type == income_tax.affected_type).where(Account.income_to_date >= income_tax.bracket_end))
+			accumulated_tax += (accum if accum is not None else 0) * full_tax
+			self.session.execute(
+						update(Account)
+						.where(Account.account_type==income_tax.affected_type)
+						.where(Account.income_to_date >= income_tax.bracket_end)
+						.values(balance=(Account.balance - full_tax))
+			)
+			
+			debtors = self.session.execute(select(Account).where(Account.balance < 0)).all()
+			for debtor in debtors:
+				debtor = debtor[0]
+				debt = -debtor.balance
+				accumulated_tax -= debt
+				debtor.balance = 0
+				logger.log(PRIVATE_LOG, f'{debtor.account_name} failed to meet their tax obligations and still owe {debt}')
+			self.session.execute(update(Account).values(income_to_date=0))
+			income_tax.to_account.balance += accumulated_tax
+
+		logger.log(PUBLIC_LOG, f'{user.mention} triggered a tax cycle')
+		self.session.commit()
+			
+		
+		
+		
+
+
 	
 	def create_recurring_transfer(self, user: Member, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> bool:
 		if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
@@ -236,6 +401,8 @@ class Backend:
 		Triggers a tick in the server should be called externally
 		Must be triggered externally 		
 		"""
+
+
 		tick_time = time.time()
 		stmt = select(RecurringTransfer).where((RecurringTransfer.last_payment_timestamp + RecurringTransfer.payment_interval) <= tick_time)
 		transfers = self.session.execute(stmt).all()
@@ -384,6 +551,7 @@ class Backend:
 		if self.get_economy_by_name(currency_name):
 			raise BackendError("An economy by that name already exists")
 
+		now = time.time()
 		economy = Economy(economy_id=uuid4(), currency_name=currency_name, currency_unit=currency_unit, owner_guild_id = user.guild.id)
 		
 		if self.get_guild_economy(user.guild.id) is not None:
@@ -391,7 +559,7 @@ class Backend:
 
 		self.session.add(Guild(guild_id=user.guild.id, economy_id=economy.economy_id))
 		self.session.add(economy)
-		self.change_many_permissions(StubUser(0), user.id, *Permissions, economy=economy)
+		self.change_many_permissions(StubUser(0), user.id, [Permissions.MANAGE_PERMISSIONS], economy=economy)
 		self.session.commit()
 		logger.log(PUBLIC_LOG, f'{user.mention} created the economy {currency_name}')
 		return economy
@@ -447,7 +615,7 @@ class Backend:
 			acc = self.get_user_account(owner_id, economy)
 			if acc is not None:
 				raise BackendError("You already have a user account")
-		elif not self.has_permission(authorisor_id, Permissions.OPEN_SPECIAL_ACCOUNT, economy=economy):
+		elif not self.has_permission(authorisor, Permissions.OPEN_SPECIAL_ACCOUNT, economy=economy):
 			raise BackendError("You do not have permission to open special accounts")
 			
 		account = Account(account_id=uuid4(), account_name=name, owner_id=owner_id, account_type=account_type, balance=0, economy=economy)
@@ -467,9 +635,6 @@ class Backend:
 	def get_account_by_name(self, account_name: str, economy: Economy) -> Account | None:
 		return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id))
 
-	def perform_transaction_tax(self, amount: int, transaction_type: TransactionType) -> int:
-		"""Performs taxation and returns the total amount of tax taken"""
-		return 0 # TODO: make this actually do something
 	
 	def perform_transaction(self, user: Member, from_account: Account, to_account: Account, amount: int, transaction_type: TransactionType = TransactionType.PERSONAL):
 		"""Performs a transaction from one account to another accounting for tax, returns a boolean indicating if the transaction was successful"""
@@ -481,15 +646,26 @@ class Backend:
 
 		if from_account.balance < amount:
 			raise BackendError("You do not have sufficient funds to transfer from that account")
+
+		if transaction_type == TransactionType.INCOME:
+			to_account.income_to_date += amount
 		from_account.balance -= amount
-		amount -= self.perform_transaction_tax(amount, transaction_type)
+		amount -= self._perform_transaction_tax(amount, transaction_type, from_account.economy)
 		to_account.balance += amount
+
+		log = PRIVATE_LOG
+		if self.has_permission(user, Permissions.GOVERNMENT_OFFICIAL, economy=from_account.economy):
+			log = PUBLIC_LOG
+		logger.log(log, f"{user.mention} transferred {amount} from {from_account.account_name} to {to_account.account_name}")
+
 		self.session.commit()
 
 	def print_money(self, user: Member, to_account: Account, amount: int):
 		if not self.has_permission(user, Permissions.MANAGE_FUNDS, account=to_account, economy=to_account.economy):
 			raise BackendError("You do not have permission to print funds")
 		to_account.balance += amount
+
+		logger.log(PUBLIC_LOG, f'{user.mention} printed {amount} to {to_account.account_name}')
 		self.session.commit()
 
 	def remove_funds(self, user: Member, from_account: Account, amount: int):
@@ -498,9 +674,8 @@ class Backend:
 		if from_account.balance < amount:
 			raise BackendError("There are not sufficient funds in this account to perform this action")
 		from_account.balance -= amount
+		logger.log(PUBLIC_LOG, f'{user.mention} removed {amount} from {from_account.account_name}')
 		self.session.commit()
-		
-		
 
 
 
