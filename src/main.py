@@ -367,7 +367,11 @@ class PermissionState(Enum):
 @app_commands.describe(state="The state you want to update the permission too")
 async def update_permissions(interaction: discord.Interaction, affects: discord.Member | discord.Role, permission: Permissions, state:PermissionState, account: str|None):
 	economy = backend.get_guild_economy(interaction.guild.id)
-
+	if account is not None:
+		account = get_account_from_name(account)
+		if account is None:
+			await interaction.response.send_message(embed=create_embed('update permissions', "That account could not be found", discord.Colour.red()), ephemeral=True)
+			return
 	try:
 		if state == PermissionState.DEFAULT:
 			backend.reset_permission(interaction.user, affects.id, permission, account, economy=economy)
