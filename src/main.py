@@ -286,7 +286,7 @@ async def close_account(interaction: discord.Interaction, account_name: str|None
 		backend.delete_account(interaction.user, account)
 		await interaction.response.send_message(embed=create_embed("close account", "Successfully closed account"), ephemeral=True)
 	except BackendError as e:
-		await intearaction.response.send_message(embed=create_embed("close account", f'Could not close account due to {e}', discord.Colour.red()), ephemeral=True)
+		await interaction.response.send_message(embed=create_embed("close account", f'Could not close account due to {e}', discord.Colour.red()), ephemeral=True)
 
 
 @bot.tree.command(name='balance', guild=test_guild)
