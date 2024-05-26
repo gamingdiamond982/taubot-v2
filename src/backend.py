@@ -157,6 +157,7 @@ class Permission(Base):
 	allowed: Mapped[bool] = mapped_column()
 	economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id", ondelete="CASCADE"), nullable=True)
 	
+	account: Mapped[Account] = relationship()	
 	economy: Mapped[Economy] = relationship()
 
 
@@ -441,6 +442,11 @@ class Backend:
 	def _one_or_none(self, stmt):
 		res = self.session.execute(stmt).one_or_none()
 		return res if res is None else res[0]
+
+
+	def get_permissions(user: Member, economy=None):
+		self.session.excecute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None)).all()
+
 
 	def has_permission(self, user: Member, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
 		"""
