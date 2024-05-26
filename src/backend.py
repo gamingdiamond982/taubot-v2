@@ -614,7 +614,7 @@ class Backend:
 		name = name if name is not None else f"<@!{owner_id}> 's account"
 		if len(name) > 64:
 			raise BackendError("That name is too long")
-		if account_type == AccountType.USER:
+		if account_type == AccountType.USER and owner_id is not None and owner_id == authorisor.id:
 			acc = self.get_user_account(owner_id, economy)
 			if acc is not None:
 				raise BackendError("You already have a user account")
