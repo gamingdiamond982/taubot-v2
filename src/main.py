@@ -501,7 +501,7 @@ def load_config():
 
 	path = 'config.json' if len(sys.argv) < 2 else sys.argv[1]
 	
-	if len(sys.argv) > 3:
+	if len(sys.argv) == 3:
 		if sys.argv[2] != "-S":
 			print('Usage: main.py config_path -[S]')
 			sys.exit(1)
