@@ -444,7 +444,7 @@ class Backend:
 		return res if res is None else res[0]
 
 
-	def get_permissions(user: Member, economy=None):
+	def get_permissions(self, user: Member, economy=None):
 		self.session.excecute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None)).all()
 
 
