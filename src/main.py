@@ -331,6 +331,19 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.Colour.red()), ephemeral=True)
 	
 
+@bot.tree.command(name='view_permissions', guild=test_guild)
+@app_commands.describe(user='The user you want to view the permissions of')
+async def view_permissions(interaction: discord.Interaction, user: discord.Member|discord.Role):
+	permissions = backend.get_permissions(user, economy=backend.get_guild_economy(interaction.guild.id))
+	names = '\n'.join([str(permission.permission) for permission in permissions])
+	accounts = '\n'.join([permission.account.account_name for permission in permissions])
+	alloweds = '\n'.join([str(permission.allowed) for permission in permissions])
+	embed = discord.Embed()
+	embed.add_field(name="permission", value=names, inline=True)
+	embed.add_field(name="account", value=accounts, inline=True)
+	embed.add_field(name="allowed", value=alloweds, inline=True)
+	await interaction.response.send_message(embed=embed)
+
 
 
 
