@@ -445,7 +445,7 @@ class Backend:
 
 
 	def get_permissions(self, user: Member, economy=None):
-		return self.session.execute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None)).all()
+		return [i[0] for i in self.session.execute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None)).all()]
 
 
 	def has_permission(self, user: Member, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
