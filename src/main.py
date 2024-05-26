@@ -337,7 +337,7 @@ async def view_permissions(interaction: discord.Interaction, user: discord.Membe
 	economy = backend.get_guild_economy(interaction.guild.id)
 	permissions = backend.get_permissions(user, economy)
 	names = '\n'.join([str(permission.permission) for permission in permissions])
-	accounts = '\n'.join([perm.account.account_name if perm.account else None for perm in permissions])
+	accounts = '\n'.join([perm.account.account_name if perm.account else "null" for perm in permissions])
 	alloweds = '\n'.join([str(permission.allowed) for permission in permissions])
 	embed = discord.Embed()
 	embed.add_field(name="permission", value=names, inline=True)
