@@ -20,6 +20,8 @@ from discord import Webhook
 import discord
 
 
+syncing = False
+
 discord_id_regex = re.compile('\A<@!?\d*>\Z') # a regex that matches a discord id
 
 id_extractor = re.compile('[<@!>]*')
@@ -68,7 +70,7 @@ class WebhookHandler(logging.Handler):
 
 
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
-test_guild = discord.Object(id=1236137485554155612) # Change to None for deployment 
+test_guild = None # discord.Object(id=1236137485554155612) # Change to None for deployment 
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -154,8 +156,10 @@ async def tick():
 async def on_ready():
 	await backend.tick(bot)
 	tick.start()
-	sync = await bot.tree.sync(guild=test_guild)
-	print(f'Synced {len(sync)} command(s)')
+	if syncing:
+		sync = await bot.tree.sync(guild=test_guild)
+		print(f'Synced {len(sync)} command(s)')
+
 	print("Successfully started bot")
 
 
@@ -490,11 +494,18 @@ def setup_webhook(logger, webhook_url, level):
 
 
 def load_config():
-	if len(sys.argv) > 2:
-		print('Usage: main.py config_path')
+	if len(sys.argv) > 3:
+		print('Usage: main.py config_path -[S]')
 		sys.exit(1)
 
-	path = 'config.json' if len(sys.argv) != 2 else sys.argv[1]
+	path = 'config.json' if len(sys.argv) < 2 else sys.argv[1]
+	
+	if len(sys.argv) > 3:
+		if sys.argv[2] != "-S":
+			print('Usage: main.py config_path -[S]')
+			sys.exit(1)
+		syncing = True
+
 	try:
 		with open(path) as file:
 			return json.load(file)
