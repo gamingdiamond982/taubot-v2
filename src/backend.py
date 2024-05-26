@@ -136,7 +136,7 @@ class Account(Base):
 	"""A class used to represent an account stored in the database"""
 	__tablename__ = 'accounts'
 	account_id: Mapped[UUID] = mapped_column(primary_key=True)
-	account_name: Mapped[str] = mapped_column(String(32))
+	account_name: Mapped[str] = mapped_column(String(64))
 	owner_id: Mapped[int] = mapped_column(BigInteger(), nullable=True)
 	account_type: Mapped[AccountType] = mapped_column()
 	balance: Mapped[int] = mapped_column(default=0)
@@ -612,6 +612,8 @@ class Backend:
 			raise BackendError("You do not have permissions to open accounts")
 
 		name = name if name is not None else f"<@!{owner_id}> 's account"
+		if len(name) > 64:
+			raise BackendError("That name is too long")
 		if account_type == AccountType.USER:
 			acc = self.get_user_account(owner_id, economy)
 			if acc is not None:
