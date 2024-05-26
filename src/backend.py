@@ -155,7 +155,7 @@ class Permission(Base):
 	user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id, due to how discord works there is zero chances of a collision
 	permission: Mapped[Permissions] = mapped_column()
 	allowed: Mapped[bool] = mapped_column()
-	economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id"), nullable=True)
+	economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id", ondelete="CASCADE"), nullable=True)
 	
 	economy: Mapped[Economy] = relationship()
 
