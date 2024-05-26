@@ -347,7 +347,7 @@ async def view_permissions(interaction: discord.Interaction, user: discord.Membe
 	embed.add_field(name="permission", value=names, inline=True)
 	embed.add_field(name="account", value=accounts, inline=True)
 	embed.add_field(name="allowed", value=alloweds, inline=True)
-	await interaction.response.send_message(embed=embed)
+	await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 
