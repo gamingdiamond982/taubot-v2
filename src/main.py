@@ -368,7 +368,7 @@ class PermissionState(Enum):
 async def update_permissions(interaction: discord.Interaction, affects: discord.Member | discord.Role, permission: Permissions, state:PermissionState, account: str|None):
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if account is not None:
-		account = get_account_from_name(account)
+		account = get_account_from_name(account, economy)
 		if account is None:
 			await interaction.response.send_message(embed=create_embed('update permissions', "That account could not be found", discord.Colour.red()), ephemeral=True)
 			return
