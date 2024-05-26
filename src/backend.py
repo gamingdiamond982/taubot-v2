@@ -149,7 +149,7 @@ class Account(Base):
 
 class Permission(Base):
 	"""A class used to represent a permission as stored in the database"""
-	__tablename__ = 'permissions'
+	__tablename__ = 'perms'
 	entry_id: Mapped[UUID] = mapped_column(primary_key=True)
 	account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True)
 	user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id, due to how discord works there is zero chances of a collision
