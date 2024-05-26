@@ -334,7 +334,8 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 @bot.tree.command(name='view_permissions', guild=test_guild)
 @app_commands.describe(user='The user you want to view the permissions of')
 async def view_permissions(interaction: discord.Interaction, user: discord.Member|discord.Role):
-	permissions = backend.get_permissions(user, economy=backend.get_guild_economy(interaction.guild.id))
+	economy = backend.get_guild_economy(interaction.guild.id)
+	permissions = backend.get_permissions(user, economy)
 	names = '\n'.join([str(permission.permission) for permission in permissions])
 	accounts = '\n'.join([permission.account.account_name for permission in permissions])
 	alloweds = '\n'.join([str(permission.allowed) for permission in permissions])
