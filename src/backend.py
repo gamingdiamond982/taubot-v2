@@ -559,7 +559,8 @@ class Backend:
 
 		self.session.add(Guild(guild_id=user.guild.id, economy_id=economy.economy_id))
 		self.session.add(economy)
-		self.change_many_permissions(StubUser(0), user.id, [Permissions.MANAGE_PERMISSIONS], economy=economy)
+		self.change_many_permissions(StubUser(0), user.id, Permissions.MANAGE_PERMISSIONS, economy=economy)
+
 		self.session.commit()
 		logger.log(PUBLIC_LOG, f'{user.mention} created the economy {currency_name}')
 		return economy
