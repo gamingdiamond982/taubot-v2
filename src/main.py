@@ -494,6 +494,7 @@ def setup_webhook(logger, webhook_url, level):
 
 
 def load_config():
+	global syncing
 	if len(sys.argv) > 3:
 		print('Usage: main.py config_path -[S]')
 		sys.exit(1)
