@@ -315,17 +315,18 @@ async def get_balance(interaction: discord.Interaction):
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
 async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str, transaction_type: TransactionType=TransactionType.PERSONAL):
 	economy = backend.get_guild_economy(interaction.guild.id)
-	if economy is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'This guild is not registered to an economy', discord.Colour.red()), ephemeral=True)
+	if economy is none:
+		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=true)
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
-	if from_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'You do not have an account to transfer from', discord.Colour.red()), ephemeral=True)
+	if from_account is none:
+		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=true)
 		return
 
-	if to_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'The account you tried to transfer too does not exist', discord.Colour.red()), ephemeral=True)
+	if to_account is none:
+		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=true)
+		return
 	
 
 	try:
@@ -333,7 +334,36 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 		await interaction.response.send_message(embed=create_embed('transfer', 'Successfully performed transaction'), ephemeral=True)
 	except (BackendError, ParseException) as e: 
 		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.Colour.red()), ephemeral=True)
+
+
+@bot.tree.command(name="create_recurring_transfer", guild=test_guild)
+@app_commands.describe(amount="The amount to transfer every interval")
+@app_commands.describe(to_account="The account you want to transfer too")
+@app_commands.describe(payment_interval="How often you want to perform the transaction in days")
+@app_commands.describe(number_of_payments="The number of payments you want to make")
+@app_commands.describe(transaction_type="The type of transfer that is being performed")
+async def create_recurring_transfer(interaction: discord.Interaction, amount: str, to_account: str, payment_interval: int, number_of_payments: int|None, transaction_type:TransactionType=TransactionType.PERSONAL):
+	economy = backend.get_guild_economy(interaction.guild.id)
+	if economy is none:
+		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=true)
+
+	to_account = get_account_from_name(to_account, economy)
+	from_account = get_account(interaction.user)
+	if from_account is none:
+		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=true)
+		return
+
+	if to_account is none:
+		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=true)
+		return
+
+	try:
+		backend.create_recurring_transfer(interaction.user, from_account, to_account, parse_amount(amount), payment_interval, number_of_payments, transaction_type)
+		await interaction.response.send_message(embed=create_embed('create recurring transfer', 'Successfully created a recurring transfer'), ephemeral=True)
+	except (BackendError, ParseException) as e:
+		await interaction.response.send_message(embed=create_embed('create recurring transfer', f"Failed to create a recurring transfer due to: {e}", discord.colour.red()), ephemeral=True)
 	
+
 
 @bot.tree.command(name='view_permissions', guild=test_guild)
 @app_commands.describe(user='The user you want to view the permissions of')
