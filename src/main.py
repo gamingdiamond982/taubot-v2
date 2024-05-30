@@ -302,6 +302,7 @@ async def get_balance(interaction: discord.Interaction):
 	account = get_account(interaction.user)
 	if account is None:
 		await interaction.response.send_message(embed=create_embed('balance', 'You do not have an account in this economy', discord.Colour.red()), ephemeral=True)
+		return
 
 	if backend.has_permission(interaction.user, Permissions.VIEW_BALANCE, account=account, economy=economy):
 		await interaction.response.send_message(embed=create_embed('balance', f'The balance on {account.account_name} is : {account.balance//100}.{account.balance%100:02}'), ephemeral=True)
