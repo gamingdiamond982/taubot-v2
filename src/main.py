@@ -321,11 +321,11 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
-	if from_account is none:
+	if from_account is None:
 		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=true)
 		return
 
-	if to_account is none:
+	if to_account is None:
 		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=true)
 		return
 	
