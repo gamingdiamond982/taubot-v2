@@ -316,7 +316,7 @@ async def get_balance(interaction: discord.Interaction):
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
 async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str, transaction_type: TransactionType=TransactionType.PERSONAL):
 	economy = backend.get_guild_economy(interaction.guild.id)
-	if economy is none:
+	if economy is None:
 		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=true)
 
 	to_account = get_account_from_name(to_account, economy)
