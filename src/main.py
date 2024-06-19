@@ -317,16 +317,16 @@ async def get_balance(interaction: discord.Interaction):
 async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str, transaction_type: TransactionType=TransactionType.PERSONAL):
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.Colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.Colour.red()), ephemeral=True)
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
 	if from_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.Colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.Colour.red()), ephemeral=True)
 		return
 
 	if to_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.Colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.Colour.red()), ephemeral=True)
 		return
 	
 
