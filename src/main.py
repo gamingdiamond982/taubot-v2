@@ -346,16 +346,16 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 async def create_recurring_transfer(interaction: discord.Interaction, amount: str, to_account: str, payment_interval: int, number_of_payments: int|None, transaction_type:TransactionType=TransactionType.PERSONAL):
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is none:
-		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=True)
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
 	if from_account is none:
-		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=True)
 		return
 
 	if to_account is none:
-		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=True)
 		return
 
 	try:
