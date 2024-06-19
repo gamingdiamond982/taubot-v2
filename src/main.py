@@ -317,16 +317,16 @@ async def get_balance(interaction: discord.Interaction):
 async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str, transaction_type: TransactionType=TransactionType.PERSONAL):
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.Colour.red()), ephemeral=true)
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
 	if from_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.Colour.red()), ephemeral=true)
 		return
 
 	if to_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=true)
+		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.Colour.red()), ephemeral=true)
 		return
 	
 
@@ -334,7 +334,7 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 		backend.perform_transaction(interaction.user, from_account, to_account, parse_amount(amount), transaction_type)
 		await interaction.response.send_message(embed=create_embed('transfer', 'Successfully performed transaction'), ephemeral=True)
 	except (BackendError, ParseException) as e: 
-		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.colour.red()), ephemeral=True)
+		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.Colour.red()), ephemeral=True)
 
 
 @bot.tree.command(name="create_recurring_transfer", guild=test_guild)
