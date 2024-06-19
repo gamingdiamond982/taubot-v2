@@ -334,7 +334,7 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 		backend.perform_transaction(interaction.user, from_account, to_account, parse_amount(amount), transaction_type)
 		await interaction.response.send_message(embed=create_embed('transfer', 'Successfully performed transaction'), ephemeral=True)
 	except (BackendError, ParseException) as e: 
-		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.Colour.red()), ephemeral=True)
+		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.colour.red()), ephemeral=True)
 
 
 @bot.tree.command(name="create_recurring_transfer", guild=test_guild)
