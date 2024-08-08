@@ -55,7 +55,8 @@ class DiscordBackendInterface(Backend):
 			await interaction.response.send_message(embed=embed, ephemeral=self.has_permission(interaction.member, Permissions.USES_EPHEMERAL))
 		return responder
 			
-
+        def get_account_from_interaction(self, inter):
+            return self.get_user_account(inter.member.id, self.get_guild_economy(inter.guild.id))
 
 	async def get_member(self, user_id, guild_id):
 		guild = await self.bot.fetch_guild(guild_id)

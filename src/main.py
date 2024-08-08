@@ -278,10 +278,12 @@ async def create_account(interaction: discord.Interaction):
 
 @bot.tree.command(name='login', description="login to an account that is not your's in order to act as your behalf", guild=test_guild)
 @app_commands.describe(account_name="The account to login as")
-async def login(interaction: discord.Interaction, account_name: str):
+async def login(interaction: discord.Interaction, account_name: str|None):
     responder = backend.get_responder()
 	economy = backend.get_guild_economy(interaction.guild.id)
-	account = get_account_from_name(account_name, economy)
+	account = get_account_from_name(account_name, economy) if account_name is not None else backend.get_account_from_interaction(interaction)
+
+
 	if account is None:
         await responder(message='We could not find any account under the name : {account_name}')
 		return
@@ -291,7 +293,7 @@ async def login(interaction: discord.Interaction, account_name: str):
 		return
 
 	login_map[interaction.user.id] = account
-	await responder(message=f'You have now logged in as {account.account_name}')
+	await responder(message=f'You have now logged in as {account.account_name}\n To log back into your user account simply run `/login` without any arguments')
 
 @bot.tree.command(name='whoami', description="tells you who you are logged in as", guild=test_guild)
 async def whoami(interaction: discord.Interaction):

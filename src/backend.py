@@ -173,7 +173,8 @@ class Account(Base):
 	economy: Mapped[Economy] = relationship(back_populates="accounts")
 
         def get_balance(self) -> str:
-            return f'{self.bakance//100}.{account.balance%100:02}'
+            """This method should be used to avoid any weird floating point shenanigans when calculating the balance"""
+            return f'{self.balance//100}.{account.balance%100:02}'
 
 
 
