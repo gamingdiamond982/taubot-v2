@@ -322,7 +322,7 @@ async def whoami(interaction: discord.Interaction):
 @app_commands.describe(owner="The owner of the new account")
 @app_commands.describe(account_name="The name of the account to open")
 @app_commands.describe(account_type="The type of account to open")
-async def open_special_account(interaction: discord.Interaction, owner: discord.Member|None, account_name: str, account_type: AccountType):
+async def open_special_account(interaction: discord.Interaction, owner: discord.Member|discord.Role|None, account_name: str, account_type: AccountType):
     responder=backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if economy is None:
