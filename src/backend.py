@@ -116,11 +116,12 @@ class TransactionType(Enum):
 class Actions(Enum):
 	"""An Enum to represent different potential actions"""
 	TRANSFER = 0
-	PRINT_MONEY = 1
-	REMOVE_FUNDS = 2
-	UPDATE_PERMISSIONS = 3
-	UPDATE_TAX_BRACKETS = 4
-	UPDATE_ECONOMES = 5
+	MANAGE_FUNDS = 1
+	UPDATE_PERMISSIONS = 2
+	UPDATE_TAX_BRACKETS = 3
+	UPDATE_ECONOMIES = 4
+	PERFORM_TAXES = 5
+	UPDATE_ACCOUNTS = 6
 
 	
 class CUD(Enum):
@@ -178,17 +179,15 @@ class Transaction(Base):
 	transaction_id: Mapped[int] = mapped_column(primary_key=True)
 	actor_id: Mapped[int] = mapped_column(BigInteger(), nullable=False)
 	timestamp: Mapped[DateTime] = mapped_column(DateTime(), nullable=False, default=datetime.now)
-	action_type: Mapped[Actions] = mapped_column()
+	action: Mapped[Actions] = mapped_column()
 	cud: Mapped[CUD] = mapped_column() # denotes the type of action taking place, can be either CREATE UPDATE or DELETE
-	action_economy_id: Mapped[UUID] = mapped_column(ForeignKey('economies.economy_id'), nullable=True)
-	target_account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True) # Transfers will use target_account as the source account for the transaction
-	destination_account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True)
+	economy_id: Mapped[UUID] = mapped_column(nullable=True)
+	target_account_id: Mapped[UUID] = mapped_column(nullable=True) # Transfers will use target_account as the source account for the transaction
+	destination_account_id: Mapped[UUID] = mapped_column(nullable=True)
 	amount: Mapped[int] = mapped_column(nullable=True)
 
 	meta: Mapped[dict[str, Any]] = mapped_column(default={}) # TODO: document this shit. - must be done before v2.1.0 releases - will be used for additional data that does not conform to this structure
 
-	target_account: Mapped[Account] = relationship(foreign_keys=[target_account_id])
-	destination_account: Mapped[Account] = relationship(foreign_keys=[destination_account_id])
 	
 
 
@@ -258,15 +257,20 @@ class StubUser:
 		self.roles = []
 
 
-
-def make_serializable(dictionary: dict):
-	new_dict = {}
-	for k in dictionary.keys():
-		v = dictionary[k]
-		print(type(v))
-		new_dict[k] = str(v) if type(v) ==  UUID else v
-
-	return new_dict
+def make_serializable(arg: Any):
+	if isinstance(arg, UUID):
+		return str(arg)
+	elif isinstance(arg, Enum):
+		return arg.name
+	elif isinstance(arg, (tuple, list)):
+		return [make_serializable(i) for i in arg]
+	elif isinstance(arg, dict):
+		new_dict = {}
+		for k in arg.keys():
+			new_dict[k] = make_serializable(arg[k])
+		return new_dict
+	else:
+		return arg
 
 
 
@@ -308,7 +312,6 @@ class Backend:
 		}
 		tax_bracket = Tax(**kwargs)
 		self.session.add(tax_bracket)
-		self.session.commit()
 		logger.log(PUBLIC_LOG, f"{user.mention} created a new tax bracket by the name {tax_name}")
 
 		
@@ -317,13 +320,13 @@ class Backend:
 		
 		self.session.add(Transaction(
 			actor_id=user.id, 
-			action_type=Actions.UPDATE_TAX_BRACKETS, 
+			action=Actions.UPDATE_TAX_BRACKETS, 
 			cud=CUD.CREATE,	
-			action_economy_id=to_account.economy.economy_id, 
+			economy_id=to_account.economy.economy_id, 
 			destination_account_id = to_account.account_id,
 			meta = make_serializable(kwargs)
 		))
-
+		self.session.commit()
 		return tax_bracket
 
 
@@ -334,12 +337,25 @@ class Backend:
 			raise BackendError("You do not have permission to create tax brackets in this economy")
 
 		tax_bracket = self.get_tax_bracket(tax_name, economy)
+		tax_bracket_id = tax_bracket.entry_id
 		if tax_bracket is None:
 			raise BackendError("No tax bracket of that name exists in this economy")
 
 		self.session.delete(tax_bracket)
-		self.session.commit()
 		logger.log(PUBLIC_LOG, f"{user.mention} deleted the tax bracket {tax_name}")
+		self.session.add(Transaction(
+			actor_id = user.id,
+			action=Actions.UPDATE_TAX_BRACKETS,
+			cud=CUD.DELETE,
+			economy_id=economy.economy_id,
+			meta = make_serializable({
+				"entry_id": tax_bracket_id,
+				"tax_name": tax_name
+			})
+		))
+
+		self.session.commit()
+
 
 
 	def _perform_transaction_tax(self, amount: int, transaction_type: TransactionType, economy: Economy) -> int:
@@ -444,6 +460,14 @@ class Backend:
 			income_tax.to_account.balance += accumulated_tax
 
 		logger.log(PUBLIC_LOG, f'{user.mention} triggered a tax cycle')
+		
+		self.session.add(Transaction(
+			actor_id = user.id,
+			action = Actions.PERFORM_TAXES,
+			cud = CUD.UPDATE,
+			economy_id = economy.economy_id,
+		))
+
 		self.session.commit()
 
 
@@ -562,6 +586,9 @@ class Backend:
 
 		best = result.pop(0)[0]
 		for r in result:
+			# Some more precedence rules
+			# permissions registered to the user directly take priority over those registered to roles
+			# and the higher the role in the discord ranking thing the higher the precedence
 			r = r[0]
 			if evaluate(best) > evaluate(r):
 				best = r
@@ -603,6 +630,17 @@ class Backend:
 			raise BackendError("You do not have permission to manage permissions here")
 
 		self._reset_permission(affected_id, permission, account, economy)
+		self.session.add(Transaction(
+			actor_id=actor.id,
+			economy_id = economy.economy_id if economy is not None else None,
+			target_account_id = account.account_id if account is not None else None,
+			action = Actions.UPDATE_PERMISSIONS,
+			cud = CUD.DELETE,
+			meta = {
+				"affected_id": affected_id,
+				"affected_permission": "ALL"
+			}
+		))
 		self.session.commit()
 
 
@@ -610,6 +648,17 @@ class Backend:
 		if not self.has_permission(actor, Permissions.MANAGE_PERMISSIONS, economy=economy):
 			raise BackendError("You do not have permission to manage permissions here")
 		self._change_permission(affected_id, permission, account, economy, allowed)
+		self.session.add(Transaction(
+			actor_id = actor.id,
+			action = Actions.UPDATE_PERMISSIONS,
+			cud = CUD.UPDATE,
+			economy_id=economy.economy_id if economy is not None else None,
+			target_account_id = account.account_id if account is not None else None,
+			meta = make_serializable({
+				"permissions": [permission],
+				"allowed": allowed
+			})
+		))
 		self.session.commit()
 
 	def change_many_permissions(self, actor: Member, affected_id: int, *permissions, account: Account = None, economy: Economy = None, allowed: bool = True):
@@ -617,6 +666,17 @@ class Backend:
 			raise BackendError("You do not have permission to manage permissions here")
 		for permission in permissions:
 			self._change_permission(affected_id, permission, account, economy, allowed)
+		self.session.add(Transaction(
+			actor_id = actor.id,
+			action = Actions.UPDATE_PERMISSIONS,
+			cud = CUD.UPDATE,
+			economy_id =  economy.economy_id if economy is not None else None,
+			target_account_id = account.account_id if account is not None else None,
+			meta = make_serializable({
+				"permissions": permissions,
+				"allowed": allowed
+			})
+		))
 		self.session.commit()
 
 	def get_economies(self):
@@ -641,6 +701,12 @@ class Backend:
 
 		self.session.commit()
 		logger.log(PUBLIC_LOG, f'{user.mention} created the economy {currency_name}')
+		self.session.add(Transaction(
+			actor_id = user.id,
+			action = Actions.UPDATE_ECONOMIES,
+			cud = CUD.CREATE,
+			economy_id = economy.economy_id
+		))
 		return economy
 
 
@@ -678,11 +744,18 @@ class Backend:
 		return [i.guild_id for i in economy.guilds]
 
 	def delete_economy(self, user: Member, economy: Economy) -> bool:
+		econ_id = economy.economy_id if economy is not None else None
 		if not self.has_permission(user, Permissions.MANAGE_ECONOMIES, economy=economy):
 			raise BackendError("You do not have permission to delete this economy")
 		self.session.execute(delete(Guild).where(Guild.economy_id == economy.economy_id))
 		
 		self.session.delete(economy)
+		self.session.add(Transaction(
+			actor_id = user.id,
+			action = Actions.UPDATE_ECONOMIES,
+			cud = CUD.DELETE,
+			economy_id = econ_id
+		))
 		self.session.commit()
 
 	def create_account(self, authorisor: Member, owner_id: int, economy: Economy, name: str=None, account_type: AccountType=AccountType.USER) -> Account:
@@ -701,13 +774,33 @@ class Backend:
 			
 		account = Account(account_id=uuid4(), account_name=name, owner_id=owner_id, account_type=account_type, balance=0, economy=economy)
 		self.session.add(account)
+		self.session.add(Transaction(
+			actor_id = authorisor.id,
+			economy_id = economy.economy_id if economy is not None else None,
+			action = Actions.UPDATE_ACCOUNTS,
+			cud = CUD.CREATE,
+			meta = make_serializable({
+				"account_type": account_type,
+				"owner_id": owner_id
+			})
+		))		
+
 		self.session.commit()
 		return account
 
 	def delete_account(self, authorisor: Member, account):
 		if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account, economy=account.economy):
 			raise BackendError("You do not have permission to close this account")
+		acc_id = account.account_id
+		econ_id = account.economy.economy_id
 		self.session.delete(account)
+		self.session.add(Transaction(
+			actor_id = authorisor.id,
+			economy_id = econ_id,
+			target_account_id = acc_id,
+			action = Actions.UPDATE_ACCOUNTS,
+			cud = CUD.DELETE
+		))
 		self.session.commit()
 
 	def get_user_account(self, user_id: int, economy: Economy) -> Account | None:
@@ -738,15 +831,30 @@ class Backend:
 		if self.has_permission(user, Permissions.GOVERNMENT_OFFICIAL, economy=from_account.economy):
 			log = PUBLIC_LOG
 		logger.log(log, f"{user.mention} transferred {amount} from {from_account.account_name} to {to_account.account_name}")
-
+		self.session.add(Transaction(
+			actor_id=user.id,
+			economy_id = from_account.economy_id,
+			target_account_id = from_account.account_id,
+			destination_account_id = to_account.account_id,
+			action = Actions.TRANSFER,
+			cud = CUD.UPDATE,
+			amount = amount
+		))	
 		self.session.commit()
 
 	def print_money(self, user: Member, to_account: Account, amount: int):
 		if not self.has_permission(user, Permissions.MANAGE_FUNDS, account=to_account, economy=to_account.economy):
 			raise BackendError("You do not have permission to print funds")
 		to_account.balance += amount
-
 		logger.log(PUBLIC_LOG, f'{user.mention} printed {amount} to {to_account.account_name}')
+		self.session.add(Transaction(
+			actor_id = user.id,
+			economy_id = to_account.economy.economy_id,
+			destination_account_id = to_account.account_id,
+			action=Actions.MANAGE_FUNDS,
+			cud=CUD.CREATE,
+			amount=amount
+		))
 		self.session.commit()
 
 	def remove_funds(self, user: Member, from_account: Account, amount: int):
@@ -756,6 +864,14 @@ class Backend:
 			raise BackendError("There are not sufficient funds in this account to perform this action")
 		from_account.balance -= amount
 		logger.log(PUBLIC_LOG, f'{user.mention} removed {amount} from {from_account.account_name}')
+		self.session.add(Transaction(
+			actor_id = user.id,
+			action = Actions.MANAGE_FUNDS,
+			cud = CUD.DELETE,
+			target_account_id = from_account.account_id,
+			economy_id = from_account.economy.economy_id,
+			amount = amount
+		))
 		self.session.commit()
 
 
