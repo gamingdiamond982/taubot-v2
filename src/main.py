@@ -3,13 +3,14 @@ import asyncio
 import time
 import sys
 import json
-from backend import Backend, BackendError, Account, Permissions, AccountType, TransactionType, TaxType
+from middleman import BackendError, Account, Permissions, AccountType, TransactionType, TaxType
+from middleman import DiscordBackendInterface as Backend
 from typing import Callable
 import datetime
 import logging
 import aiohttp
 import re
-
+from time import time
 from enum import Enum
 from typing import Union
 
@@ -20,6 +21,8 @@ from discord import Webhook
 import discord
 
 
+
+init_time = datetime.datetime.now()
 syncing = False
 
 discord_id_regex = re.compile('\A<@!?\d*>\Z') # a regex that matches a discord id
@@ -70,7 +73,7 @@ class WebhookHandler(logging.Handler):
 
 
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
-test_guild = None # discord.Object(id=1236137485554155612) # Change to None for deployment 
+test_guild = discord.Object(id=1236137485554155612) # Change to None for deployment 
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -143,17 +146,17 @@ def parse_amount(amount: str) -> int:
 
 
 
-bot = commands.Bot(intents=intents, help_command=None)
+bot = commands.Bot(intents=intents, help_command=None, command_prefix='!')
 
 
 @tasks.loop(time=tick_time)
 async def tick():
-	await backend.tick(bot)
+	await backend.tick()
 
 
 @bot.event
 async def on_ready():
-	await backend.tick(bot)
+	await backend.tick()
 	tick.start()
 	if syncing:
 		sync = await bot.tree.sync(guild=test_guild)
@@ -163,8 +166,52 @@ async def on_ready():
 
 
 @bot.tree.command(name="ping", description="ping the bot to check if it's online", guild=test_guild)
-async def ping(interaction: discord.Interaction):
-	await interaction.response.send_message(f'Pong!')
+@app_commands.describe(debug="Whether or not to display debug info")
+async def ping(interaction: discord.Interaction, debug: bool=False):
+	if not debug:
+		await interaction.response.send_message(f'Pong!')
+
+	ping = datetime.timedelta
+	now = datetime.datetime.now(datetime.timezone.utc)
+	keys = ["Connected to Discord: ","Backend Exists: ","Connected to Database: ","Ping: ","Uptime: "]
+	values = [True, backend is not None, backend is not None, str((now-interaction.created_at).microseconds)+'ms',str(datetime.datetime.now()-init_time)]
+	green = True
+	if backend is not None:
+		try:
+			con = backend.engine.raw_connection()
+			if con is not None:
+				values[2] = True
+				con.close()
+			else:
+				green = False
+		except Exception:
+			values[2] = False
+			green = False
+	else:
+		green = False
+
+	def proccess(value):
+		if type(value) == bool:
+			return '🟢' if value else '🔴'
+		else:
+			return value
+		
+
+	colour = discord.Colour.green() if green else discord.Colour.red()
+	embed = discord.Embed(colour=colour)
+	keys = '\n'.join([k for k in keys])
+	values = '\n'.join([proccess(v) for v in values])
+	embed.add_field(name='All Systems Go: ', value=keys, inline=True)
+	embed.add_field(name=proccess(green), value=values, inline=True)
+	
+	# Because I want this to work even if things are really broken I'm not using a responder thingy
+	await interaction.response.send_message(embed=embed)
+	
+
+		
+	
+
+
 
 @bot.tree.command(name="create_economy", description="Creates a new economy", guild=test_guild)
 @app_commands.describe(economy_name="The name of the economy")
@@ -554,8 +601,7 @@ if __name__ == '__main__':
 	config = load_config()
 	db_path = config.get('database_uri')
 	db_path = db_path if db_path else 'sqlite:///database.db'
-	backend = Backend(db_path)
-
+	backend = Backend(bot, db_path)
 	token = config.get('discord_token')
 	if not token:
 		logger.log(logging.CRITICAL, "Discord token not found in the config file")
