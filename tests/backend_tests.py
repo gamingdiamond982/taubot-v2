@@ -8,6 +8,7 @@ import asyncio
 
 sys.path.append(path.join(path.dirname(path.dirname(path.abspath(__file__))), 'src'))
 
+from middleman import *
 from backend import *
 
 logger.setLevel(100) # shut that thing up
@@ -100,7 +101,7 @@ admin = add_member(0)
 
 
 def create_test_backend(path=":memory:"):
-	return Backend(f"sqlite:///{path}") # This is for testing purposes only in production a postgresql backend should be used instead
+	return DiscordBackendInterface(bot, f"sqlite:///{path}") # This is for testing purposes only in production a postgresql backend should be used instead
 
 class BackendTests(unittest.TestCase):
 
@@ -230,20 +231,20 @@ class BackendTests(unittest.TestCase):
 		self.assertEqual(backend.get_user_account(user_id, econ).balance, 990)
 		old_time_func = time.time
 		time.time = lambda: old_time_func() + 60*60 # monkey patching the time function so that we can time travel
-		asyncio.run(backend.tick(bot))
+		asyncio.run(backend.tick())
 		self.assertEqual(backend.get_user_account(user_id, econ).balance, 990)
 		time.time = lambda: old_time_func() + 60*60*24
-		asyncio.run(backend.tick(bot))
+		asyncio.run(backend.tick())
 		self.assertEqual(backend.get_user_account(user_id, econ).balance, 980)
 
 		time.time = lambda: old_time_func() + 60*60*24*7 # testing what would happen if the bot was left offline for a while
 
-		asyncio.run(backend.tick(bot))
+		asyncio.run(backend.tick())
 	
 		self.assertEqual(backend.get_user_account(user_id, econ).balance, 920)
 	
 		time.time = lambda: old_time_func() + 60*60*24*12 # making sure the bot stops when it's meant too	
-		asyncio.run(backend.tick(bot))
+		asyncio.run(backend.tick())
 		self.assertEqual(backend.get_user_account(user_id, econ).balance, 900)
 
 	def test_taxes(self):
