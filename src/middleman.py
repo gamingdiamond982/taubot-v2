@@ -42,8 +42,11 @@ class DiscordBackendInterface(Backend):
 		
 
 	def get_responder(self, interaction):
+        '''
+        Using currying to save on some of the boilerplate code we normally use
+        '''
 		title = interaction.command.name
-		async def responder(message=None, embed=None):
+		async def responder(message=None, embed=None, colour=None):
 			colour = colour if colour is not None else discord.Colour.yellow()
 			embed = discord.Embed(colour=discord.Colour.yellow()) if embed is None else embed
 			embed.set_thumbnail(url=interaction.member.display_avater.url)

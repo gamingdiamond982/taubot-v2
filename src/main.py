@@ -19,9 +19,7 @@ from discord import app_commands
 from discord import Webhook
 
 import discord
-
-
-
+from discord.Colour import red, yellow, blue, orange
 init_time = datetime.datetime.now()
 syncing = False
 
@@ -63,7 +61,7 @@ class WebhookHandler(logging.Handler):
 			await wh.send(*args, **kwargs)
 
 	def emit(self, record: logging.LogRecord):
-		embed = discord.Embed(colour=discord.Colour.blue())
+		embed = discord.Embed(colour=blue())
 		embed.add_field(name=record.name, value=record.message, inline=False)
 		asyncio.get_event_loop().create_task(self.send(embed=embed))
 
@@ -175,7 +173,7 @@ async def ping(interaction: discord.Interaction, debug: bool=False):
 	now = datetime.datetime.now(datetime.timezone.utc)
 	keys = ["Connected to Discord: ","Backend Exists: ","Connected to Database: ","Ping: ","Uptime: "]
 	values = [True, backend is not None, backend is not None, str((now-interaction.created_at).microseconds)+'ms',str(datetime.datetime.now()-init_time)]
-	green = True
+	good = True
 	if backend is not None:
 		try:
 			con = backend.engine.raw_connection()
@@ -183,26 +181,26 @@ async def ping(interaction: discord.Interaction, debug: bool=False):
 				values[2] = True
 				con.close()
 			else:
-				green = False
+				good = False
 		except Exception:
 			values[2] = False
-			green = False
+			good = False
 	else:
-		green = False
+		good = False
 
 	def proccess(value):
 		if type(value) == bool:
-			return '🟢' if value else '🔴'
+			return '🟢' if value else '🔴' # My vim setup on this laptop isn't rendering these rights, but they are the unicode emoji for a green circle and a red circle respectively
 		else:
 			return value
 		
 
-	colour = discord.Colour.green() if green else discord.Colour.red()
+	colour = green() if good else red()
 	embed = discord.Embed(colour=colour)
 	keys = '\n'.join([k for k in keys])
 	values = '\n'.join([proccess(v) for v in values])
 	embed.add_field(name='All Systems Go: ', value=keys, inline=True)
-	embed.add_field(name=proccess(green), value=values, inline=True)
+	embed.add_field(name=proccess(good), value=values, inline=True)
 	
 	# Because I want this to work even if things are really broken I'm not using a responder thingy
 	await interaction.response.send_message(embed=embed)
@@ -217,60 +215,63 @@ async def ping(interaction: discord.Interaction, debug: bool=False):
 @app_commands.describe(economy_name="The name of the economy")
 @app_commands.describe(currency_unit="The unit of currency to be used in the economy")
 async def create_economy(interaction: discord.Interaction, economy_name: str, currency_unit: str):
+    responder = backend.get_responder(interaction)
 	try:
 		backend.create_economy(interaction.user, economy_name, currency_unit)
-		await interaction.response.send_message(embed=create_embed('create-economy', 'Successfully created a new economy'), ephemeral=True)
+        await responder(message="Successfully created a new economy")
 	except BackendError as e:
-		await interaction.response.send_message(embed=create_embed('create_economy', f'Could not create a new economy : {e}', colour=discord.Colour.red()), ephemeral=True)
+        await responder(message=f"Could not create a new economy : {e}", colour=RED)
 
 @bot.tree.command(name="list_economies", description="lists all of the currently registered economies", guild=test_guild)
 async def list_economies(interaction: discord.Interaction):
+    responder = backend.get_responder(interaction)
 	economies = backend.get_economies()
 	names = '\n'.join([i.currency_name for i in economies])
 	units = '\n'.join([i.currency_unit for i in economies])
 	num_guilds = '\n'.join([str(len(i.guilds)) for i in economies])
-	embed = discord.Embed(colour=discord.Colour.blue())
+	embed = discord.Embed(colour=blue())
 	embed.add_field(name='economy name', value=names, inline=True)
 	embed.add_field(name='currency unit', value=units, inline=True)
 	embed.add_field(name='guilds present', value=num_guilds, inline=True)
-	await interaction.response.send_message(embed=embed, ephemeral=True)
+	await responder(embed=embed)
 
 @bot.tree.command(name='join_economy', description="registers this guild as a member of a named economy", guild=test_guild)
 @app_commands.describe(economy_name="The name of the economy you want to join")
 async def join_economy(interaction: discord.Interaction, economy_name: str):
+    responder = backend.get_responder(interaction)
 	economy = backend.get_economy_by_name(economy_name)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('join_economy', 'That economy could not be found, try creating it with /create_economy', discord.Colour.red()), ephemeral=True)
-		return
-
+		await responder(message='That economy could not be found, try creating it with `/create_economy`', colour=red()))
+        return
 	backend.register_guild(interaction.user, interaction.guild.id, economy)
-	await interaction.response.send_message(embed=create_embed('join_economy', f'Successfully joined economy: {economy_name}'), ephemeral=True)
+	await responder(message=f'Successfully joined economy: {economy_name}'), ephemeral=True)
 
 @bot.tree.command(name='delete_economy', description="Deletes an economy", guild=test_guild)
 @app_commands.describe(economy_name='The name of the economy')
 async def delete_economy(interaction: discord.Interaction, economy_name: str):
+    responder = backend.get_responder(interaction)
 	economy = backend.get_economy_by_name(economy_name)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('delete_economy', 'That economy could not be found double check the name you passed in', discord.Colour.red()), ephemeral=True)
-		return
+		await responder(message='That economy could not be found double check the name you passed in', red())		return
 
 	try:
 		backend.delete_economy(interaction.user, economy)
-		await interaction.response.send_message(embed=create_embed('delete_economy', 'Economy was successfully deleted'), ephemeral=True)
+        await responder(message="Economy was successfully deleted")
 	except BackendError as e:
-		await interaction.response.send_message(embed=create_embed('delete_economy', 'The economy could not be deleted: {e}', discord.Colour.red()), ephemeral=True)
+        await responder(message="The economy could not be deleted: {e}", colour=red())
 
 @bot.tree.command(name='open_account', description="opens a user account in this guild's economy", guild=test_guild)
 async def create_account(interaction: discord.Interaction):
+    responder = backend.responder(interaction)
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('open_account', 'This guild is not registered to an economy so an account cannot be opened here', discord.Colour.orange()), ephemeral=True)
+        await responder(message='This guild is not registered to an economy so an account could not be opened here', colour = orange())
 		return
 	try:
 		backend.create_account(interaction.user, interaction.user.id, economy)
-		await interaction.response.send_message(embed=create_embed('open_account', 'Your account was opened succesfully'), ephemeral=True)
+        await responder(message='Your account was opened successfully')
 	except BackendError as e:
-		await interaction.response.send_message(embed=create_embed('open_account', f'The account could not be opened: {e}', discord.Colour.red()), ephemeral=True)
+        await responder(message=f'The account could not be opened: {e}', colour=red())
 
 
 
@@ -278,27 +279,30 @@ async def create_account(interaction: discord.Interaction):
 @bot.tree.command(name='login', description="login to an account that is not your's in order to act as your behalf", guild=test_guild)
 @app_commands.describe(account_name="The account to login as")
 async def login(interaction: discord.Interaction, account_name: str):
+    responder = backend.get_responder()
 	economy = backend.get_guild_economy(interaction.guild.id)
 	account = get_account_from_name(account_name, economy)
 	if account is None:
-		await interaction.response.send_message(embed=create_embed('login', f'We could not find any account under the name : {account_name}', discord.Colour.orange()), ephemeral=True)
+        await responder(message='We could not find any account under the name : {account_name}')
 		return
 
 	if not backend.has_permission(interaction.user, Permissions.LOGIN_AS_ACCOUNT, account=account, economy=economy):
-		await interaction.response.send_message(embed=create_embed('login', f'You do not have permission to login as {account.account_name}', discord.Colour.red()), ephemeral=True)
+		await responder(message='You do not have permission to login as {account.account_name}', colour=red())
 		return
 
 	login_map[interaction.user.id] = account
-	await interaction.response.send_message(embed=create_embed('login', f'You have now logged in as {account.account_name}'), ephemeral=True)
+	await responder(message=f'You have now logged in as {account.account_name}')
 
 @bot.tree.command(name='whoami', description="tells you who you are logged in as", guild=test_guild)
 async def whoami(interaction: discord.Interaction):
 	me = get_account(interaction.user)
+    responder = backend.get_responder(interaction)
 	if me is None:
-		await interaction.response.send_message(embed=create_embed("whoami", "You do not have an account in this economy"), ephemeral=True)
+        await responder(message="You do not have an account in this economy")
 		return
 
-	await interaction.response.send_message(embed=create_embed("whoami", f"You are acting as : {me.account_name}"), ephemeral=True)
+
+    await responder(message=f"You are acting as {me.account_name}")
 
 
 
@@ -308,52 +312,55 @@ async def whoami(interaction: discord.Interaction):
 @app_commands.describe(account_name="The name of the account to open")
 @app_commands.describe(account_type="The type of account to open")
 async def open_special_account(interaction: discord.Interaction, owner: discord.Member|None, account_name: str, account_type: AccountType):
-	economy = backend.get_guild_economy(interaction.guild.id)
+    responder=backend.get_responder(interaction)
+    economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('open special account', 'This guild is not registered to an economy, therefore an account cannot be opened here', discord.Colour.red()), ephemeral=True)
+        await responder(message="This guild is not registered to an economy, therefore an account cannot be opened here", colour=red())
 		return
 	try:
 		backend.create_account(interaction.user, owner.id if owner is not None else None, economy, name=account_name, account_type = account_type)
-		await interaction.response.send_message(embed=create_embed('open special account', 'Account opened successfully'), ephemeral=True)
+        await responder(message="Account opened successfully", ephemeral=True)
 	except BackendError as e:
-		await interaction.response.send_message(embed=create_embed('open special account', f'Could not open account due to : {e}', discord.Colour.red()), ephemeral=True)
+        await responder(message="Could not open account due to : {e}", colour=red())
 
 
 @bot.tree.command(name="close_account", guild=test_guild)
 @app_commands.describe(account_name="The name of the account you want to close")
 async def close_account(interaction: discord.Interaction, account_name: str|None):
-	economy = backend.get_guild_economy(interaction.guild.id)
+	responder = backend.get_responder(interaction)
+    economy = backend.get_guild_economy(interaction.guild.id)
 	if account_name is None:
 		account = get_account(interaction.user)
 	else:
 		account = get_account_from_name(account_name, economy)
 
 	if account is None:
-		await interaction.response.send_message(embed=create_embed("close account", f'could not find that account', discord.Colour.red()), ephemeral=True)
+        await responder(message='Could not find that account', colour=red())
 		return
 
 	try:
 		backend.delete_account(interaction.user, account)
-		await interaction.response.send_message(embed=create_embed("close account", "Successfully closed account"), ephemeral=True)
+        await responder(message="Successfully closed account")
 	except BackendError as e:
-		await interaction.response.send_message(embed=create_embed("close account", f'Could not close account due to {e}', discord.Colour.red()), ephemeral=True)
+        await responder(message="Could not close account due to {e}", colour=red())
 
 
 @bot.tree.command(name='balance', guild=test_guild)
 async def get_balance(interaction: discord.Interaction):
+    responder = backend.get_responder(interaction)
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('balance', 'This guild is not registered to an economy', discord.Colour.red()), ephemeral=True)
+        await responder(message='This guild is not registered to an economy', colour=red())
 		return
 	account = get_account(interaction.user)
 	if account is None:
-		await interaction.response.send_message(embed=create_embed('balance', 'You do not have an account in this economy', discord.Colour.red()), ephemeral=True)
+        await responder(message='You do not have an account in this economy', colour=red())
 		return
 
 	if backend.has_permission(interaction.user, Permissions.VIEW_BALANCE, account=account, economy=economy):
-		await interaction.response.send_message(embed=create_embed('balance', f'The balance on {account.account_name} is : {account.balance//100}.{account.balance%100:02}'), ephemeral=True)
+        await responder(message='The balance on {account.account_name} is : {account.get_balance()}')
 	else:
-		await interaction.response.send_message(embed=create_embed('balance', f'You do not have permission to view the balance of {account.account_name}'), ephemeral=True)
+        await responder(message='You do not have permission to view the balance of {account.account_name}')
 
 
 @bot.tree.command(name='transfer', guild=test_guild)
@@ -361,18 +368,19 @@ async def get_balance(interaction: discord.Interaction):
 @app_commands.describe(to_account="The account to transfer the funds too")
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
 async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str, transaction_type: TransactionType=TransactionType.PERSONAL):
+    responder = backend.get_responder(interaction)
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.Colour.red()), ephemeral=True)
+        await responder(message='This guild is not registered to an economy', colour=red())
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
 	if from_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.Colour.red()), ephemeral=True)
+        await responder(message='You do not have an account to transfer from', colour=red())
 		return
 
 	if to_account is None:
-		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.Colour.red()), ephemeral=True)
+        await responder(message='The account you tried to transfer too does not exist', colour=red())
 		return
 	
 
