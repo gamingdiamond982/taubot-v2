@@ -1,7 +1,6 @@
 import time
-import datetime
+from datetime import datetime
 import logging
-
 import discord
 from discord import Member # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
 
@@ -13,7 +12,8 @@ from enum import Enum
 from uuid import UUID, uuid4
 from sqlalchemy import func
 
-from sqlalchemy import String, BigInteger, Date
+from sqlalchemy import String, BigInteger, DateTime, JSON # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
+
 from sqlalchemy import create_engine
 from sqlalchemy import select, delete, update
 
@@ -27,6 +27,8 @@ from sqlalchemy.orm import DeclarativeBase
 
 from sqlalchemy.exc import MultipleResultsFound
 
+from typing import Any
+
 
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,9 @@ PUBLIC_LOG = 52 # I'm picking these numbers so they do not clash with any others
 
 
 class Base(DeclarativeBase):
-	pass
+	type_annotation_map= {
+		dict[str, Any]: JSON
+	}
 
 
 
@@ -71,6 +75,11 @@ class Permissions(Enum):
 
 	GOVERNMENT_OFFICIAL = 11
 
+
+	# Account Attributes
+	USES_EPHEMERAL = 13
+
+
 	
 
 CONSOLE_USER_ID = 0 # a user id for the console - if I ever decide to strap a CLI onto this thing that will be its user id, 0 is an impossible discord id to have so it works for our purposes	
@@ -102,6 +111,22 @@ class TransactionType(Enum):
 	INCOME = 1
 	PURCHASE = 2
 
+
+
+class Actions(Enum):
+	"""An Enum to represent different potential actions"""
+	TRANSFER = 0
+	PRINT_MONEY = 1
+	REMOVE_FUNDS = 2
+	UPDATE_PERMISSIONS = 3
+	UPDATE_TAX_BRACKETS = 4
+	UPDATE_ECONOMES = 5
+
+	
+class CUD(Enum):
+	CREATE = 0
+	UPDATE = 1
+	DELETE = 2
 
 
 
@@ -147,17 +172,38 @@ class Account(Base):
 
 
 
+class Transaction(Base):
+	"""A class used to represent transactions stored in the database"""
+	__tablename__ = 'transactions'
+	transaction_id: Mapped[int] = mapped_column(primary_key=True)
+	actor_id: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+	timestamp: Mapped[DateTime] = mapped_column(DateTime(), nullable=False, default=datetime.now)
+	action_type: Mapped[Actions] = mapped_column()
+	cud: Mapped[CUD] = mapped_column() # denotes the type of action taking place, can be either CREATE UPDATE or DELETE
+	action_economy_id: Mapped[UUID] = mapped_column(ForeignKey('economies.economy_id'), nullable=True)
+	target_account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True) # Transfers will use target_account as the source account for the transaction
+	destination_account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True)
+	amount: Mapped[int] = mapped_column(nullable=True)
+
+	meta: Mapped[dict[str, Any]] = mapped_column(default={}) # TODO: document this shit. - must be done before v2.1.0 releases - will be used for additional data that does not conform to this structure
+
+	target_account: Mapped[Account] = relationship(foreign_keys=[target_account_id])
+	destination_account: Mapped[Account] = relationship(foreign_keys=[destination_account_id])
+	
+
+
+
 class Permission(Base):
 	"""A class used to represent a permission as stored in the database"""
 	__tablename__ = 'perms'
 	entry_id: Mapped[UUID] = mapped_column(primary_key=True)
 	account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True)
-	user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id, due to how discord works there is zero chances of a collision
+	user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id, due to how discord works there are zero chances of a collision
 	permission: Mapped[Permissions] = mapped_column()
 	allowed: Mapped[bool] = mapped_column()
 	economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id", ondelete="CASCADE"), nullable=True)
 	
-	account: Mapped[Account] = relationship()	
+	account: Mapped[Account] = relationship()
 	economy: Mapped[Economy] = relationship()
 
 
@@ -212,6 +258,18 @@ class StubUser:
 		self.roles = []
 
 
+
+def make_serializable(dictionary: dict):
+	new_dict = {}
+	for k in dictionary.keys():
+		v = dictionary[k]
+		print(type(v))
+		new_dict[k] = str(v) if type(v) ==  UUID else v
+
+	return new_dict
+
+
+
 class Backend:
 	"""A singleton used to call the backend database"""
 	
@@ -219,7 +277,7 @@ class Backend:
 		self.engine = create_engine(path)
 		self.session = Session(self.engine)
 		Base.metadata.create_all(self.engine)
-
+			
 
 
 	def get_tax_bracket(self, tax_name, economy):
@@ -236,20 +294,36 @@ class Backend:
 
 		if self.get_tax_bracket(tax_name, to_account.economy) is not None:
 			raise BackendError("A tax bracket of that name already exists in this economy")
-		tax_bracket = Tax(
-			entry_id = uuid4(),
-			tax_name=tax_name,
-			affected_type = affected_type,
-			tax_type = tax_type,
-			bracket_start = bracket_start,
-			bracket_end = bracket_end,
-			rate = rate,
-			to_account_id = to_account.account_id,
-			economy_id = to_account.economy.economy_id
-		)
+
+		kwargs = {
+			"entry_id": uuid4(),
+			"tax_name": tax_name,
+			"affected_type": affected_type,
+			"tax_type": tax_type,
+			"bracket_start": bracket_start,
+			"bracket_end": bracket_end,
+			"rate": rate,
+			"to_account_id": to_account.account_id,
+			"economy_id": to_account.economy.economy_id
+		}
+		tax_bracket = Tax(**kwargs)
 		self.session.add(tax_bracket)
 		self.session.commit()
 		logger.log(PUBLIC_LOG, f"{user.mention} created a new tax bracket by the name {tax_name}")
+
+		
+		
+	
+		
+		self.session.add(Transaction(
+			actor_id=user.id, 
+			action_type=Actions.UPDATE_TAX_BRACKETS, 
+			cud=CUD.CREATE,	
+			action_economy_id=to_account.economy.economy_id, 
+			destination_account_id = to_account.account_id,
+			meta = make_serializable(kwargs)
+		))
+
 		return tax_bracket
 
 
@@ -336,6 +410,7 @@ class Backend:
 						.where(Account.account_type == income_tax.affected_type)
 						.where(Account.income_to_date >= income_tax.bracket_start)
 						.where(Account.income_to_date < income_tax.bracket_end)
+						.where(Account.economy_id == income_tax.economy_id)
 			)
 
 			self.session.execute(
@@ -343,6 +418,7 @@ class Backend:
 						.where(Account.account_type == income_tax.affected_type)
 						.where(Account.income_to_date >= income_tax.bracket_start)
 						.where(Account.income_to_date < income_tax.bracket_end)
+						
 						.values(balance=((Account.income_to_date-income_tax.bracket_start)*income_tax.rate)//100)
 			)
 			
@@ -369,10 +445,6 @@ class Backend:
 
 		logger.log(PUBLIC_LOG, f'{user.mention} triggered a tax cycle')
 		self.session.commit()
-			
-		
-		
-		
 
 
 	
