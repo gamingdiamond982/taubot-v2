@@ -72,12 +72,10 @@ class Permissions(Enum):
 	OPEN_SPECIAL_ACCOUNT = 9
 
 	LOGIN_AS_ACCOUNT = 10
-
 	GOVERNMENT_OFFICIAL = 11
 
-
-	# Account Attributes
-	USES_EPHEMERAL = 13
+	# attributes or some BS
+	USES_EPHEMERAL = 12
 
 
 	
@@ -96,6 +94,10 @@ DEFAULT_OWNER_PERMISSIONS = [
 	Permissions.LOGIN_AS_ACCOUNT
 ]
 
+UNPRIVILEGED_PERMISSIONS = [
+	Permissions.USES_EPHEMERAL,
+	Permissions.GOVERNMENT_OFFICIAL
+]
 
 
 
@@ -147,7 +149,6 @@ class Economy(Base):
 		
 
 
-
 class Guild(Base):
 	"""A class used to represent a discord server stored in the database"""
 	__tablename__ = 'guilds'
@@ -189,6 +190,13 @@ class Transaction(Base):
 	meta: Mapped[dict[str, Any]] = mapped_column(default={}) # TODO: document this shit. - must be done before v2.1.0 releases - will be used for additional data that does not conform to this structure
 
 	
+
+class BalanceUpdateNotifier(Base):
+	__tablename__ = 'balance_update_notifiers'
+	notifier_id: Mapped[UUID] = mapped_column(primary_key=True)
+	owner_id: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+	account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.account_id"))
+	account: Mapped[Account] = relationship()
 
 
 
@@ -282,6 +290,19 @@ class Backend:
 		self.session = Session(self.engine)
 		Base.metadata.create_all(self.engine)
 			
+
+	"""Discord Shit"""
+		
+	def notify_user(self, user_id, message, title, thumbnail=None):
+		raise NotImplementedError()
+
+	async def get_member(self, user_id, guild_id):
+		raise NotImplementedError()
+
+	async def get_user_dms(self, user_id):
+		raise NotImplementedError()
+
+	"""End Discord Shit"""
 
 
 	def get_tax_bracket(self, tax_name, economy):
@@ -492,14 +513,17 @@ class Backend:
 		self.perform_transaction(user, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, rec_transfer.transaction_type)
 	
 			
-	
-	async def tick(self, bot):
+
+
+
+
+	async def tick(self):
 		"""
 		Triggers a tick in the server should be called externally
 		Must be triggered externally 		
 		"""
 
-
+		messages: list[tuple[int, str]] = []
 		tick_time = time.time()
 		stmt = select(RecurringTransfer).where((RecurringTransfer.last_payment_timestamp + RecurringTransfer.payment_interval) <= tick_time)
 		transfers = self.session.execute(stmt).all()
@@ -513,20 +537,14 @@ class Backend:
 					break
 				
 				try:
-					guild = await bot.fetch_guild(transfer.from_account.economy.owner_guild_id)
-					authorisor = await guild.fetch_member(transfer.authorisor_id) if guild is not None else None
+					authorisor = await self.get_member(transfer.authorisor_id)
 					if authorisor is None:
 						authorisor = StubUser(transfer.authorisor_id)
 					self.perform_transaction(authorisor, transfer.from_account, transfer.to_account, transfer.amount, transfer.transaction_type)
 					payments_left -= 1
 				except BackendError as e:
 					logger.log(PRIVATE_LOG, f'Failed to perform recurring transaction of {transfer.amount} from {transfer.from_account.account_name} to {transfer.to_account.account_name} due to : {e}')
-					user = await bot.fetch_user(transfer.authorisor_id)
-					if user is not None:
-						dms = user.dm_channel if user.dm_channel else await user.create_dm()
-						embed = discord.Embed(discord.Colour.red())
-						embed.add_field("Recurring Transaction Failed!", "Your recurring transaction of {transfer.amount} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}")
-						dms.send(embed=embed)
+					self.notify_user(transfer.authorisor_id, "Your recurring transaction of {transfer.amount} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}")
 					self.session.delete(transfer)
 			else: # for those unfamiliar with for/else this is not executed if the loop breaks
 				transfer.number_of_payments_left = payments_left
@@ -625,6 +643,12 @@ class Backend:
 		self.session.add(permission)
 
 	
+
+	def toggle_ephemeral(self, actor: Member):
+		self._change_permission(actor.id, Permissions.USES_EPHEMERAL, None, None, not self.has_permission(actor, Permissions.USES_EPHEMERAL))
+		self.session.commit() 
+
+
 	def reset_permission(self, actor: Member, affected_id:int, permission:Permissions, account: Account = None, economy: Economy = None):
 		if not self.has_permission(actor, Permissions.MANAGE_PERMISSIONS,  economy=economy):
 			raise BackendError("You do not have permission to manage permissions here")
