@@ -78,6 +78,7 @@ class WebhookHandler(logging.Handler):
 
 
 
+
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
 test_guild = discord.Object(id=1236137485554155612) # Change to None for deployment 
 
@@ -93,6 +94,9 @@ login_map: dict[int, Account] = {}
 tick_time = datetime.time(hour=0, minute=0) # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
 
 backend = None # Stop any fucky undefined errors
+
+
+
 
 
 def get_account(member):
@@ -176,6 +180,7 @@ async def on_ready():
 async def ping(interaction: discord.Interaction, debug: bool=False):
     if not debug:
         await interaction.response.send_message(f'Pong!')
+        return
 
     ping = datetime.timedelta
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -595,6 +600,48 @@ async def toggle_ephemeral(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     backend.toggle_ephemeral(interaction.user)
     await responder("Successfully updated your prefrences")
+
+
+@bot.tree.command(name='view_transaction_log', guild=test_guild)
+@app_commands.describe(account="The account you want to view the transaction logs of, leave empty to default to the account your currently logged in as.")
+@app_commands.describe(limit="The number of transactions back you wish too see, note: will not show transactions before this feature was added")
+async def view_transaction_log(interaction: discord.Interaction, account: str|None, limit: int=10):
+    economy = backend.get_guild_economy(interaction.guild.id)
+    responder = backend.get_responder(interaction)
+
+    if economy is None:
+        await responder(message="This guild is not registered to an economy", colour=red())
+    
+    account = get_account_from_name(account, economy)
+    account = account if account is not None else get_account(interaction.user)
+    
+    transactions = backend.get_transaction_log(interaction.user, account)
+    
+    entries = '\n'.join(['{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.from_account.account_name} --{frmt(t.amount)}t-> {t.destination_account.account_name}'])
+    if len(transactions) == 0:
+        entries='No transactions have been logged yet'
+    """
+    timestamps = '\n'.join([t.timestamp.strftime("%d/%m/%y %H:%M") for t in transactions])
+    from_accounts = '\n'.join([t.target_account.account_name for t in transactions])
+    to_accounts = '\n'.join([t.target_account.account_name for t in transactions])
+    amounts = '\n'.join([frmt(t.amount) for t in transactions])
+    embed = discord.Embed()
+    embed.add_field(name="timestamp:", value=timestamps, inline=True)
+    embed.add_field(name="from: ", value=from_accounts, inline=True)
+    embed.add_field(name="to: ", value=to_accounts, inline=True)
+    embed.add_field(name="amount: ", value=amounts, inline=True)
+    """
+    await responder(message=entries)
+    
+    
+    
+    
+     
+    
+     
+
+    
+    
 
 
 def setup_webhook(logger, webhook_url, level):

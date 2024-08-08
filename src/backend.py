@@ -172,6 +172,7 @@ class Account(Base):
     balance: Mapped[int] = mapped_column(default=0)
     income_to_date: Mapped[int] = mapped_column(default=0)
     economy_id = mapped_column(ForeignKey("economies.economy_id"))
+    deleted = False
     
     economy: Mapped[Economy] = relationship(back_populates="accounts")
     update_notifiers: Mapped[List["BalanceUpdateNotifier"]] = relationship(back_populates='account')
@@ -184,6 +185,9 @@ class Account(Base):
         """This method should be used to avoid any weird floating point shenanigans when calculating the balance"""
         return frmt(self.balance)
 
+    def delete(self):
+        self.deleted = True
+
 
 
 class Transaction(Base):
@@ -195,11 +199,16 @@ class Transaction(Base):
     action: Mapped[Actions] = mapped_column()
     cud: Mapped[CUD] = mapped_column() # denotes the type of action taking place, can be either CREATE UPDATE or DELETE
     economy_id: Mapped[UUID] = mapped_column(nullable=True)
-    target_account_id: Mapped[UUID] = mapped_column(nullable=True) # Transfers will use target_account as the source account for the transaction
-    destination_account_id: Mapped[UUID] = mapped_column(nullable=True)
+    target_account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.account_id"), nullable=True) # Transfers will use target_account as the source account for the transaction
+    destination_account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.account_id"), nullable=True)
     amount: Mapped[int] = mapped_column(nullable=True)
 
-    meta: Mapped[dict[str, Any]] = mapped_column(default={}) # TODO: document this shit. - must be done before v2.1.0 releases - will be used for additional data that does not conform to this structure
+    meta: Mapped[dict[str, Any]] = mapped_column(default={}) # TODO: document this shit. 
+
+    destination_account: Mapped[Account] = relationship(foreign_keys=[destination_account_id])
+    target_account: Mapped[Account] = relationship(foreign_keys=[target_account_id])
+
+    
 
     
 
@@ -303,6 +312,110 @@ class Backend:
         Base.metadata.create_all(self.engine)
             
 
+    async def tick(self):
+        """
+        Triggers a tick in the server should be called externally
+        Must be triggered externally        
+        """
+
+        messages: list[tuple[int, str]] = []
+        tick_time = time.time()
+        stmt = select(RecurringTransfer).where((RecurringTransfer.last_payment_timestamp + RecurringTransfer.payment_interval) <= tick_time)
+        transfers = self.session.execute(stmt).all()
+        for transfer in transfers:
+            transfer = transfer[0]
+            number_of_transfers = int((tick_time - transfer.last_payment_timestamp) // transfer.payment_interval)
+            payments_left = transfer.number_of_payments_left # I'm extracting this value since updating ORM objects is more expensive than updating an int and informing the ORM of the changes at the end.
+            for i in range(number_of_transfers):
+                if payments_left == 0:
+                    self.session.delete(transfer)
+                    break
+                
+                try:
+                    authorisor = await self.get_member(transfer.authorisor_id, transfer.from_account.economy.owner_guild_id)
+                    if authorisor is None:
+                        authorisor = StubUser(transfer.authorisor_id)
+                    self.perform_transaction(authorisor, transfer.from_account, transfer.to_account, transfer.amount, transfer.transaction_type)
+                    payments_left -= 1
+                except BackendError as e:
+                    logger.log(PRIVATE_LOG, f'Failed to perform recurring transaction of {frmt(transfer.amount)} from {transfer.from_account.account_name} to {transfer.to_account.account_name} due to : {e}')
+                    self.notify_user(transfer.authorisor_id, "Your recurring transaction of {frmt(transfer.amount)} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}")
+                    self.session.delete(transfer)
+            else: # for those unfamiliar with for/else this is not executed if the loop breaks
+                transfer.number_of_payments_left = payments_left
+                transfer.last_payment_timestamp = tick_time
+        self.session.commit()
+        logger.log(PUBLIC_LOG, f'successfully performed tick')
+
+
+    def _one_or_none(self, stmt):
+        res = self.session.execute(stmt).one_or_none()
+        return res if res is None else res[0]
+
+
+    def get_permissions(self, user: Member, economy=None):
+        return [i[0] for i in self.session.execute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None).where(Permission.user_id==user.id)).all()]
+
+
+    def has_permission(self, user: Member, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
+        """
+        Checks if a user is allowed to do something
+        """
+        if user.id == CONSOLE_USER_ID:
+            return True
+
+        if account is not None and economy is None:
+            economy = account.economy
+
+        stmt = select(Permission).where(Permission.user_id.in_([user.id] + [r.id for r in user.roles])).where(Permission.permission == permission)
+        stmt = stmt.where((Permission.account_id == (account.account_id if account is not None else None)) | (Permission.account_id == None))
+        stmt = stmt.where((Permission.economy_id == (economy.economy_id if economy is not None else None)) | (Permission.economy_id == None))
+        default = False
+        owner_id = account.owner_id if account is not None else None
+
+        if permission in DEFAULT_GLOBAL_PERMISSIONS:
+            default = True
+        elif permission in DEFAULT_OWNER_PERMISSIONS and owner_id in [user.id] + [r.id for r in user.roles]:
+            default = True
+        
+        
+        result = list(self.session.execute(stmt).all())
+        
+        if len(result) == 0:
+            return default
+
+
+        def evaluate(perm):
+            # Precedence for result : 
+            # 1. account & economy are null
+            # 2. account is null
+            # 3. account & economy are not null
+            # Economy cannot be null without account being null
+            if perm.account_id is None and perm.economy_id is None:
+                return 1
+            if perm.account_id is None:
+                return 2
+            return 3
+
+        best = result.pop(0)[0]
+        for r in result:
+            # Some more precedence rules
+            # permissions registered to the user directly take priority over those registered to roles
+            # and the higher the role in the discord ranking thing the higher the precedence
+            r = r[0]
+            if evaluate(best) > evaluate(r):
+                best = r
+                continue
+            if evaluate(best) == evaluate(r):
+                if best.user_id == user.id:
+                    continue
+                elif r.user_id == user.id:
+                    best = r
+                elif user.guild.get_role(best.user_id) < user.guild.get_role(r.user_id):
+                    best = r
+        
+        return best.allowed
+
     """Discord Shit"""
     def notify_user(self, user_id, message, title, thumbnail=None):
         logger.warning("Backend failed to message user: {user_id}")
@@ -317,7 +430,7 @@ class Backend:
     async def get_user_dms(self, user_id):
         raise NotImplementedError()
 
-    """End Discord Shit"""
+    """Taxes"""
 
 
     def get_tax_bracket(self, tax_name, economy):
@@ -507,136 +620,8 @@ class Backend:
         self.session.commit()
 
 
-    
-    def create_recurring_transfer(self, user: Member, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> bool:
-        if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
-            raise BackendError("You do not have permission to transfer funds on this account")
-        rec_transfer = RecurringTransfer(
-                entry_id = uuid4(),
-                authorisor_id = user.id,
-                from_account_id=from_account.account_id,
-                to_account_id = to_account.account_id,
-                amount = amount,
-                last_payment_timestamp = time.time(),
-                payment_interval = payment_interval,
-                transaction_type = transaction_type,
-                number_of_payments_left = number_of_payments - 1
-        )
+    """Permissions"""
 
-        self.session.add(rec_transfer)
-        self.session.commit()
-        self.perform_transaction(user, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, rec_transfer.transaction_type)
-    
-            
-
-
-
-
-    async def tick(self):
-        """
-        Triggers a tick in the server should be called externally
-        Must be triggered externally        
-        """
-
-        messages: list[tuple[int, str]] = []
-        tick_time = time.time()
-        stmt = select(RecurringTransfer).where((RecurringTransfer.last_payment_timestamp + RecurringTransfer.payment_interval) <= tick_time)
-        transfers = self.session.execute(stmt).all()
-        for transfer in transfers:
-            transfer = transfer[0]
-            number_of_transfers = int((tick_time - transfer.last_payment_timestamp) // transfer.payment_interval)
-            payments_left = transfer.number_of_payments_left # I'm extracting this value since updating ORM objects is more expensive than updating an int and informing the ORM of the changes at the end.
-            for i in range(number_of_transfers):
-                if payments_left == 0:
-                    self.session.delete(transfer)
-                    break
-                
-                try:
-                    authorisor = await self.get_member(transfer.authorisor_id, transfer.from_account.economy.owner_guild_id)
-                    if authorisor is None:
-                        authorisor = StubUser(transfer.authorisor_id)
-                    self.perform_transaction(authorisor, transfer.from_account, transfer.to_account, transfer.amount, transfer.transaction_type)
-                    payments_left -= 1
-                except BackendError as e:
-                    logger.log(PRIVATE_LOG, f'Failed to perform recurring transaction of {frmt(transfer.amount)} from {transfer.from_account.account_name} to {transfer.to_account.account_name} due to : {e}')
-                    self.notify_user(transfer.authorisor_id, "Your recurring transaction of {frmt(transfer.amount)} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}")
-                    self.session.delete(transfer)
-            else: # for those unfamiliar with for/else this is not executed if the loop breaks
-                transfer.number_of_payments_left = payments_left
-                transfer.last_payment_timestamp = tick_time
-        self.session.commit()
-        logger.log(PUBLIC_LOG, f'successfully performed tick')
-
-
-    def _one_or_none(self, stmt):
-        res = self.session.execute(stmt).one_or_none()
-        return res if res is None else res[0]
-
-
-    def get_permissions(self, user: Member, economy=None):
-        return [i[0] for i in self.session.execute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None).where(Permission.user_id==user.id)).all()]
-
-
-    def has_permission(self, user: Member, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
-        """
-        Checks if a user is allowed to do something
-        """
-        if user.id == CONSOLE_USER_ID:
-            return True
-
-        if account is not None and economy is None:
-            economy = account.economy
-
-        stmt = select(Permission).where(Permission.user_id.in_([user.id] + [r.id for r in user.roles])).where(Permission.permission == permission)
-        stmt = stmt.where((Permission.account_id == (account.account_id if account is not None else None)) | (Permission.account_id == None))
-        stmt = stmt.where((Permission.economy_id == (economy.economy_id if economy is not None else None)) | (Permission.economy_id == None))
-        default = False
-        owner_id = account.owner_id if account is not None else None
-
-        if permission in DEFAULT_GLOBAL_PERMISSIONS:
-            default = True
-        elif permission in DEFAULT_OWNER_PERMISSIONS and owner_id in [user.id] + [r.id for r in user.roles]:
-            default = True
-        
-        
-        result = list(self.session.execute(stmt).all())
-        
-        if len(result) == 0:
-            return default
-
-
-        def evaluate(perm):
-            # Precedence for result : 
-            # 1. account & economy are null
-            # 2. account is null
-            # 3. account & economy are not null
-            # Economy cannot be null without account being null
-            if perm.account_id is None and perm.economy_id is None:
-                return 1
-            if perm.account_id is None:
-                return 2
-            return 3
-
-        best = result.pop(0)[0]
-        for r in result:
-            # Some more precedence rules
-            # permissions registered to the user directly take priority over those registered to roles
-            # and the higher the role in the discord ranking thing the higher the precedence
-            r = r[0]
-            if evaluate(best) > evaluate(r):
-                best = r
-                continue
-            if evaluate(best) == evaluate(r):
-                if best.user_id == user.id:
-                    continue
-                elif r.user_id == user.id:
-                    best = r
-                elif user.guild.get_role(best.user_id) < user.guild.get_role(r.user_id):
-                    best = r
-        
-        return best.allowed
-
-        
     def _reset_permission(self, user_id, permission, account, economy):
         stmt = (delete(Permission)
                 .where(Permission.user_id == user_id)
@@ -718,6 +703,9 @@ class Backend:
         ))
         self.session.commit()
 
+
+    """Economies"""
+
     def get_economies(self):
         return [i[0] for i in self.session.execute(select(Economy)).all()]
 
@@ -797,6 +785,8 @@ class Backend:
         ))
         self.session.commit()
 
+    """Accounts"""
+
     def create_account(self, authorisor: Member, owner_id: int, economy: Economy, name: str=None, account_type: AccountType=AccountType.USER) -> Account:
         if not self.has_permission(authorisor, Permissions.OPEN_ACCOUNT, economy=economy):
             raise BackendError("You do not have permissions to open accounts")
@@ -843,12 +833,44 @@ class Backend:
         self.session.commit()
 
     def get_user_account(self, user_id: int, economy: Economy) -> Account | None:
-        return self._one_or_none(select(Account).where(Account.owner_id == user_id).where(Account.account_type == AccountType.USER).where(Account.economy_id == economy.economy_id))
+        return self._one_or_none(select(Account).where(Account.owner_id == user_id).where(Account.account_type == AccountType.USER).where(Account.economy_id == economy.economy_id).where(Account.deleted==False))
 
     def get_account_by_name(self, account_name: str, economy: Economy) -> Account | None:
         return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id))   
 
  
+    """Transfers"""
+
+    def get_transaction_log(self, user: Member, account: Account, limit=None): 
+        if not self.has_permission(user, Permissions.VIEW_BALANCE, account=account):
+            raise BackendError("You do not have permissions to view the transaction log on this account")
+        stmt = select(Transaction).where((Transaction.target_account_id == account.account_id) | (Transaction.destination_account_id == account.account_id)).where(Transaction.action == Actions.TRANSFER).order_by(Transaction.timestamp.desc())
+        stmt = stmt.limit(limit)
+        r = self.session.execute(stmt)
+        results = [i[0] for i in r.all()]
+        return results
+    
+
+    
+    def create_recurring_transfer(self, user: Member, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> bool:
+        if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
+            raise BackendError("You do not have permission to transfer funds on this account")
+        rec_transfer = RecurringTransfer(
+                entry_id = uuid4(),
+                authorisor_id = user.id,
+                from_account_id=from_account.account_id,
+                to_account_id = to_account.account_id,
+                amount = amount,
+                last_payment_timestamp = time.time(),
+                payment_interval = payment_interval,
+                transaction_type = transaction_type,
+                number_of_payments_left = number_of_payments - 1
+        )
+
+        self.session.add(rec_transfer)
+        self.session.commit()
+        self.perform_transaction(user, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, rec_transfer.transaction_type)
+        
     def perform_transaction(self, user: Member, from_account: Account, to_account: Account, amount: int, transaction_type: TransactionType = TransactionType.PERSONAL):
         """Performs a transaction from one account to another accounting for tax, returns a boolean indicating if the transaction was successful"""
         if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
@@ -916,9 +938,3 @@ class Backend:
         ))
         self.notify_users(from_account.get_update_notifiers(), f'{user.mention} removed {frmt(amount)} from {from_account.account_name},\n it\'s new balance is {from_account.get_balance()}', "Balance Update")
         self.session.commit()
-
-
-
-
-
-

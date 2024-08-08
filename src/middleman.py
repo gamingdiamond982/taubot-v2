@@ -46,14 +46,14 @@ class DiscordBackendInterface(Backend):
         Using currying to save on some of the boilerplate code we normally use
         '''
         title = interaction.command.name
-        async def responder(message=None, colour=None, embed=None):
+        async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url,**kwargs):
             colour = colour if colour is not None else discord.Colour.yellow()
             embed = discord.Embed(colour=discord.Colour.yellow()) if embed is None else embed
-            embed.set_thumbnail(url=interaction.user.display_avatar.url)
+            embed.set_thumbnail(url=thumbnail)
             embed.add_field(name=title, value=message) if message is not None else None
             embed.set_footer(text="This message was sent by a bot and is probably highly important")
             ephemeral = self.has_permission(interaction.user, Permissions.USES_EPHEMERAL)
-            await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            await interaction.response.send_message(embed=embed, ephemeral=ephemeral, **kwargs)
         return responder
 
 
