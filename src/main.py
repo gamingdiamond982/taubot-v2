@@ -252,7 +252,8 @@ async def delete_economy(interaction: discord.Interaction, economy_name: str):
     responder = backend.get_responder(interaction)
 	economy = backend.get_economy_by_name(economy_name)
 	if economy is None:
-		await responder(message='That economy could not be found double check the name you passed in', red())		return
+		await responder(message='That economy could not be found double check the name you passed in',colour=red()
+        return
 
 	try:
 		backend.delete_economy(interaction.user, economy)
@@ -271,7 +272,7 @@ async def create_account(interaction: discord.Interaction):
 		backend.create_account(interaction.user, interaction.user.id, economy)
         await responder(message='Your account was opened successfully')
 	except BackendError as e:
-        await responder(message=f'The account could not be opened: {e}', colour=red())
+         await responder(message=f'The account could not be opened: {e}', colour=red())
 
 
 
@@ -288,7 +289,7 @@ async def login(interaction: discord.Interaction, account_name: str|None):
         await responder(message='We could not find any account under the name : {account_name}')
 		return
 
-	if not backend.has_permission(interaction.user, Permissions.LOGIN_AS_ACCOUNT, account=account, economy=economy):
+	if not backend.has_permission(interaction.user, Permissions.LOGIN_AS_ACCOUNT, account=account):
 		await responder(message='You do not have permission to login as {account.account_name}', colour=red())
 		return
 
@@ -388,9 +389,9 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 
 	try:
 		backend.perform_transaction(interaction.user, from_account, to_account, parse_amount(amount), transaction_type)
-		await interaction.response.send_message(embed=create_embed('transfer', 'Successfully performed transaction'), ephemeral=True)
+		await responder('Successfully performed transaction')
 	except (BackendError, ParseException) as e: 
-		await interaction.response.send_message(embed=create_embed('transfer', f'Failed to perform transaction due to : {e}', discord.Colour.red()), ephemeral=True)
+		await responder(message=f'Failed to perform transaction due to : {e}', colour=red())
 
 
 @bot.tree.command(name="create_recurring_transfer", guild=test_guild)
@@ -400,31 +401,33 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 @app_commands.describe(number_of_payments="The number of payments you want to make")
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
 async def create_recurring_transfer(interaction: discord.Interaction, amount: str, to_account: str, payment_interval: int, number_of_payments: int|None, transaction_type:TransactionType=TransactionType.PERSONAL):
+    responder = backend.get_responder(interaction)
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is none:
-		await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=True)
+		await responder('this guild is not registered to an economy',colour=red())
 
 	to_account = get_account_from_name(to_account, economy)
 	from_account = get_account(interaction.user)
 	if from_account is none:
-		await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=True)
+		await responder('you do not have an account to transfer from', colour=red())
 		return
 
 	if to_account is none:
-		await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=True)
+		await responder('the account you tried to transfer too does not exist', colour=red())
 		return
 
 	try:
 		backend.create_recurring_transfer(interaction.user, from_account, to_account, parse_amount(amount), payment_interval, number_of_payments, transaction_type)
-		await interaction.response.send_message(embed=create_embed('create recurring transfer', 'Successfully created a recurring transfer'), ephemeral=True)
+		await responder('Successfully created a recurring transfer')
 	except (BackendError, ParseException) as e:
-		await interaction.response.send_message(embed=create_embed('create recurring transfer', f"Failed to create a recurring transfer due to: {e}", discord.colour.red()), ephemeral=True)
+		await responder(message=f"Failed to create a recurring transfer due to: {e}", colour=red())
 	
 
 
 @bot.tree.command(name='view_permissions', guild=test_guild)
 @app_commands.describe(user='The user you want to view the permissions of')
 async def view_permissions(interaction: discord.Interaction, user: discord.Member|discord.Role):
+    responder = backend.get_responder(interaction)
 	economy = backend.get_guild_economy(interaction.guild.id)
 	permissions = backend.get_permissions(user, economy)
 	names = '\n'.join([str(permission.permission) for permission in permissions])
@@ -434,7 +437,7 @@ async def view_permissions(interaction: discord.Interaction, user: discord.Membe
 	embed.add_field(name="permission", value=names, inline=True)
 	embed.add_field(name="account", value=accounts, inline=True)
 	embed.add_field(name="allowed", value=alloweds, inline=True)
-	await interaction.response.send_message(embed=embed, ephemeral=True)
+	await responder(embed=embed)
 
 
 
@@ -454,10 +457,11 @@ class PermissionState(Enum):
 @app_commands.describe(state="The state you want to update the permission too")
 async def update_permissions(interaction: discord.Interaction, affects: discord.Member | discord.Role, permission: Permissions, state:PermissionState, account: str|None):
 	economy = backend.get_guild_economy(interaction.guild.id)
+    responder = backend.get_responder(interaction)
 	if account is not None:
 		account = get_account_from_name(account, economy)
 		if account is None:
-			await interaction.response.send_message(embed=create_embed('update permissions', "That account could not be found", discord.Colour.red()), ephemeral=True)
+			await responder(message="That account could not be found", colour=red())
 			return
 	try:
 		if state == PermissionState.DEFAULT:
@@ -466,10 +470,9 @@ async def update_permissions(interaction: discord.Interaction, affects: discord.
 			allowed = bool(state.value)
 			backend.change_permissions(interaction.user, affects.id, permission, account, economy=economy, allowed=allowed)
 		
-		await interaction.response.send_message(embed=create_embed('update_permissions', 'successfully updated permissions'), ephemeral=True)
+		await responder(message='successfully updated permissions')
 	except BackendError as e:
-		await interaction.response.send_message(embed=create_embed('update permissions', f'could not update permissions due to : {e}', discord.Colour.red()), ephemeral=True)
-			
+		await responder(f'could not update permissions due to : {e}', colour=red())
 
 
 @bot.tree.command(name="print_money", guild=test_guild)
@@ -477,26 +480,28 @@ async def update_permissions(interaction: discord.Interaction, affects: discord.
 @app_commands.describe(amount="The amount you want to print")
 async def print_money(interaction: discord.Interaction, to_account: str, amount: str):
 	economy = backend.get_guild_economy(interaction.guild.id)
+    responder = backend.get_responder(interaction)
 	if economy is None:
-		await interaction.response.send_message(embed=create_embed('print money', 'This guild is not registered to an economy.', discord.Colour.red()), ephemeral=True)
+		await responder('This guild is not registered to an economy.', colour=red())
 		return
 
 	to_account = get_account_from_name(to_account, economy)
 	if to_account is None:
-		await interaction.response.send_message(embed=create_embed('print money', 'That account could not be found.', discord.Colour.red()), ephemeral=True)
+		await responder('That account could not be found.', red())
 		return
 
 	try:
 		backend.print_money(interaction.user, to_account, parse_amount(amount))
-		await interaction.response.send_message(embed=create_embed('print money', 'Successfully printed money'), ephemeral=True)
+		await responder('Successfully printed money')
 	except (BackendError, ParseException) as e:
-		await interaction.response.send_message(embed=create_embed('print money', f'Failed to print money due to : {e}', discord.Colour.red()), ephemeral=True)
+		await responder(f'Failed to print money due to : {e}', red())
 
 
 @bot.tree.command(name="remove_funds", guild=test_guild)
 @app_commands.describe(from_account="The account you want to remove funds from")
 @app_commands.describe(amount="The amount you want to remove")
 async def remove_funds(interaction: discord.Interaction, from_account: str, amount: str):
+    responder=backend
 	economy = backend.get_guild_economy(interaction.guild.id)
 	if economy is None:
 		await interaction.response.send_message(embed=create_embed('remove funds', 'This guild is not registered to an economy.', discord.Colour.red()), ephemeral=True)
