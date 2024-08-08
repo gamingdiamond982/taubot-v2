@@ -172,6 +172,9 @@ class Account(Base):
 	
 	economy: Mapped[Economy] = relationship(back_populates="accounts")
 
+        def get_balance(self) -> str:
+            return f'{self.bakance//100}.{account.balance%100:02}'
+
 
 
 class Transaction(Base):
