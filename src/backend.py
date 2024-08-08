@@ -595,7 +595,7 @@ class Backend:
 
         if permission in DEFAULT_GLOBAL_PERMISSIONS:
             default = True
-        elif permission in DEFAULT_OWNER_PERMISSIONS and user.id == owner_id:
+        elif permission in DEFAULT_OWNER_PERMISSIONS and owner_id in [user.id] + [r.id for r in user.roles]:
             default = True
         
         
