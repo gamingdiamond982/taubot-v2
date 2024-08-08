@@ -914,7 +914,7 @@ class Backend:
             economy_id = from_account.economy.economy_id,
             amount = amount
         ))
-        self.notify_users(to_account.get_update_notifiers(), f'{user.mention} removed {frmt(amount)} from {from_account.account_name},\n it\'s new balance is {from_account.get_balance()}', "Balance Update")
+        self.notify_users(from_account.get_update_notifiers(), f'{user.mention} removed {frmt(amount)} from {from_account.account_name},\n it\'s new balance is {from_account.get_balance()}', "Balance Update")
         self.session.commit()
 
 
