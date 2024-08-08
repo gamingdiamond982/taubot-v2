@@ -99,10 +99,8 @@ admin = add_member(0)
 
 
 
-def create_test_backend():
-	return Backend("sqlite:///:memory:") # This is for testing purposes only in production a postgresql backend should be used instead
-
-
+def create_test_backend(path=":memory:"):
+	return Backend(f"sqlite:///{path}") # This is for testing purposes only in production a postgresql backend should be used instead
 
 class BackendTests(unittest.TestCase):
 

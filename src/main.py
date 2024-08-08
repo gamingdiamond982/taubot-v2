@@ -143,13 +143,12 @@ def parse_amount(amount: str) -> int:
 
 
 
-bot = commands.Bot(intents=intents, command_prefix="!", help_command=None)
+bot = commands.Bot(intents=intents, help_command=None)
 
 
 @tasks.loop(time=tick_time)
 async def tick():
 	await backend.tick(bot)
-
 
 
 @bot.event
