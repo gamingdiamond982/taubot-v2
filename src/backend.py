@@ -920,7 +920,7 @@ class Backend:
         ))
 
         self.notify_users(to_account.get_update_notifiers(), f"{user.mention} transferred {frmt(amount)} from {from_account.account_name} to {to_account.account_name}, \n it\'s new balance is {to_account.get_balance()}", "Balance Update")
-        self.notify_users(from_account.get_update_notifiers(), f'{user.mention} transferred {frmt(amount)} from an account you watch ({from_account.account_name}), to {to_account.accoun_name} \n {from_account.accoun_name}\'s new balance is {account.get_balance()}', "Balance Update")
+        self.notify_users(from_account.get_update_notifiers(), f'{user.mention} transferred {frmt(amount)} from an account you watch ({from_account.account_name}), to {to_account.account_name} \n {from_account.account_name}\'s new balance is {from_account.get_balance()}', "Balance Update")
         self.session.commit()
 
     def print_money(self, user: Member, to_account: Account, amount: int):
