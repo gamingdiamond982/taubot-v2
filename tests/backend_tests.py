@@ -77,8 +77,9 @@ class BackendTests(unittest.TestCase):
 
         self.assertEqual(backend.get_guild_economy(guild_id), test_economy)
         
-
-
+        
+        
+        
 
     def test_open_and_close_account(self):
         backend = create_test_backend()
