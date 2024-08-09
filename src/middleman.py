@@ -1,6 +1,6 @@
 import discord
 import asyncio
-from backend import Backend, BackendError, Account, Permissions, AccountType, TransactionType, TaxType
+from backend import Backend, BackendError, Account, Permissions, AccountType, TransactionType, TaxType, frmt
 
 """
 class LoopAdder:
@@ -58,7 +58,7 @@ class DiscordBackendInterface(Backend):
 
 
     def get_account_from_interaction(self, inter):
-        return self.get_user_account(inter.member.id, self.get_guild_economy(inter.guild.id))
+        return self.get_user_account(inter.user.id, self.get_guild_economy(inter.guild.id))
 
     async def get_member(self, user_id, guild_id):
         guild = await self.bot.fetch_guild(guild_id)

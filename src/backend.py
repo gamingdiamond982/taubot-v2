@@ -185,6 +185,11 @@ class Account(Base):
         """This method should be used to avoid any weird floating point shenanigans when calculating the balance"""
         return frmt(self.balance)
 
+    def get_name(self) -> str:
+        if self.account_type == AccountType.USER:
+            return f'<@{self.owner_id}>'
+        return self.account_name
+
     def delete(self):
         self.deleted = True
 
@@ -836,7 +841,7 @@ class Backend:
         return self._one_or_none(select(Account).where(Account.owner_id == user_id).where(Account.account_type == AccountType.USER).where(Account.economy_id == economy.economy_id).where(Account.deleted==False))
 
     def get_account_by_name(self, account_name: str, economy: Economy) -> Account | None:
-        return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id))   
+        return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id)).where(Account.deleted==False)
 
  
     """Transfers"""
@@ -870,6 +875,18 @@ class Backend:
         self.session.add(rec_transfer)
         self.session.commit()
         self.perform_transaction(user, rec_transfer.from_account, rec_transfer.to_account, rec_transfer.amount, rec_transfer.transaction_type)
+
+    def subscribe(self, user, account):
+        if not self.has_permission(user, Permissions.VIEW_BALANCE, account=account):
+            raise BackendError("You do not have permissions to subscribe to transaction_notifs for this account")
+        self.session.add(BalanceUpdateNotifier(notifier_id = uuid4(), owner_id = user.id, account_id = account.account_id))
+        self.session.commit()
+
+    def unsubscribe(self, user, account):
+        [self.session.delete(notifier) for notifier in account.update_notifiers if notifier.user_id == user.id]
+        self.session.commit()
+
+        
         
     def perform_transaction(self, user: Member, from_account: Account, to_account: Account, amount: int, transaction_type: TransactionType = TransactionType.PERSONAL):
         """Performs a transaction from one account to another accounting for tax, returns a boolean indicating if the transaction was successful"""

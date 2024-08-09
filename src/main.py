@@ -3,16 +3,15 @@ import asyncio
 import time
 import sys
 import json
-from middleman import BackendError, Account, Permissions, AccountType, TransactionType, TaxType
+from middleman import BackendError, Account, Permissions, AccountType, TransactionType, TaxType, frmt
 from middleman import DiscordBackendInterface as Backend
-from typing import Callable
+from typing import Callable, Union, Awaitable, Coroutine
 import datetime
 import logging
 import aiohttp
 import re
 from time import time
 from enum import Enum
-from typing import Union
 
 from discord.ext import tasks, commands
 from discord import app_commands
@@ -20,6 +19,8 @@ from discord import Webhook
 
 import discord
 from discord import Colour
+from types import CoroutineType
+
 
 red = Colour.red
 yellow = Colour.yellow
@@ -171,7 +172,6 @@ async def on_ready():
     if syncing:
         sync = await bot.tree.sync(guild=test_guild)
         print(f'Synced {len(sync)} command(s)')
-
     print("Successfully started bot")
 
 
@@ -595,6 +595,7 @@ async def perform_tax(interaction: discord.Interaction):
         
 
 
+
 @bot.tree.command(name='toggle_ephemeral', guild=test_guild)
 async def toggle_ephemeral(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
@@ -614,33 +615,48 @@ async def view_transaction_log(interaction: discord.Interaction, account: str|No
     
     account = get_account_from_name(account, economy)
     account = account if account is not None else get_account(interaction.user)
+    try: 
+        transactions = backend.get_transaction_log(interaction.user, account)
+    except BackendError as e:
+        await responder(message=f"{e}")
     
-    transactions = backend.get_transaction_log(interaction.user, account)
-    
-    entries = '\n'.join(['{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.from_account.account_name} --{frmt(t.amount)}t-> {t.destination_account.account_name}'])
+    entries = '\n'.join([f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}t-> {t.destination_account.get_name()}' for t in transactions])
     if len(transactions) == 0:
         entries='No transactions have been logged yet'
-    """
-    timestamps = '\n'.join([t.timestamp.strftime("%d/%m/%y %H:%M") for t in transactions])
-    from_accounts = '\n'.join([t.target_account.account_name for t in transactions])
-    to_accounts = '\n'.join([t.target_account.account_name for t in transactions])
-    amounts = '\n'.join([frmt(t.amount) for t in transactions])
-    embed = discord.Embed()
-    embed.add_field(name="timestamp:", value=timestamps, inline=True)
-    embed.add_field(name="from: ", value=from_accounts, inline=True)
-    embed.add_field(name="to: ", value=to_accounts, inline=True)
-    embed.add_field(name="amount: ", value=amounts, inline=True)
-    """
     await responder(message=entries)
-    
-    
-    
-    
      
-    
      
 
     
+@bot.tree.command(name="subscribe", guild=test_guild)
+@app_commands.describe(account="The account you want to get balance update notifications for")
+async def subscribe(interaction: discord.Interaction, account: str):
+    economy = backend.get_guild_economy(interaction.guild.id)
+    responder = backend.get_responder(interaction)
+    
+    if economy is None:
+        await responder(message="This guild is not registered to an economy", colour=red())
+    
+    account = get_account_from_name(account, economy)
+    try:
+        backend.subscribe(interaction.user, account)
+    except BackendError as e:
+        await responder(message=f'{e}')
+    await responder(f'Successfully subscribed to recieve balance updates from {account.account_name}')
+
+
+@bot.tree.command(name="unsubscribe", guild=test_guild)
+@app_commands.describe(account="The account you want to unsubscribe from.")
+async def unsubscribe(interaction: discord.Interaction, account:str):
+    economy = backend.get_guild_economy(interaction.guild.id)
+    responder = backend.get_responder(interaction)
+    if economy is None:
+        await responder(message="This guild is not registered to an economy", colour=red())
+
+    account = get_account_from_name(account, economy)
+    backend.unsubscribe(interaction.user, account)
+
+    await responder(message="You will no longer receive balance updates from {account.account_name}.")
     
 
 
@@ -699,4 +715,6 @@ if __name__ == '__main__':
     
         
     bot.run(token, log_handler=None)
+
+
 
