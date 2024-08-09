@@ -841,7 +841,7 @@ class Backend:
         return self._one_or_none(select(Account).where(Account.owner_id == user_id).where(Account.account_type == AccountType.USER).where(Account.economy_id == economy.economy_id).where(Account.deleted==False))
 
     def get_account_by_name(self, account_name: str, economy: Economy) -> Account | None:
-        return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id)).where(Account.deleted==False)
+        return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id).where(Account.deleted==False))
 
  
     """Transfers"""
