@@ -656,7 +656,7 @@ async def unsubscribe(interaction: discord.Interaction, account:str):
     account = get_account_from_name(account, economy)
     backend.unsubscribe(interaction.user, account)
 
-    await responder(message="You will no longer receive balance updates from {account.account_name}.")
+    await responder(message=f"You will no longer receive balance updates from {account.account_name}.")
     
 
 
