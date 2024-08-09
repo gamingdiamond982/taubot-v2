@@ -172,7 +172,7 @@ class Account(Base):
     balance: Mapped[int] = mapped_column(default=0)
     income_to_date: Mapped[int] = mapped_column(default=0)
     economy_id = mapped_column(ForeignKey("economies.economy_id"))
-    deleted = False
+    deleted: Mapped[bool] = mapped_column(default=False)
     
     economy: Mapped[Economy] = relationship(back_populates="accounts")
     update_notifiers: Mapped[List["BalanceUpdateNotifier"]] = relationship(back_populates='account')
