@@ -47,7 +47,6 @@ class Base(DeclarativeBase):
     }
 
 
-
 class AccountType(Enum):
     """Enum used to represent the different possible account types"""
     USER = 0
@@ -160,6 +159,13 @@ class Guild(Base):
     economy_id = mapped_column(ForeignKey("economies.economy_id"))
     
     economy: Mapped[Economy] = relationship(back_populates="guilds")
+
+
+
+class MCDiscordMap(Base):
+    __tablename__ = 'mcdiscordlink'
+    user_id: Mapped[int] = mapped_column(BigInteger(), primary_key = True)
+    mc_token: Mapped[str] = mapped_column(String(22), primary_key = True)
 
 
 class Account(Base):
@@ -434,6 +440,29 @@ class Backend:
 
     async def get_user_dms(self, user_id):
         raise NotImplementedError()
+
+    def get_discord_id(self, mc_token):
+        mc_ds_map = self._one_or_none(select(MCDiscordMap).where(MCDiscordMap.mc_token == mc_token))
+        if mc_ds_map:
+            return mc_ds_map.user_id
+        return None
+
+    def register_mc_token(self, user_id, mc_token):
+        if len(mc_token) != 22:
+            raise BackendError("Invalid mc token provided")
+
+        current_id = self.get_discord_id(mc_token)
+        if current_id is not None:
+            raise BackendError("This minecraft account is already linked with a user account, contact an admin if you believe this is in error")
+
+        current_map = self._one_or_none(select(MCDiscordMap).where(MCDiscordMap.user_id == user_id))
+        if current_map is not None:
+            self.session.delete(current_map)
+
+        new_map = MCDiscordMap(user_id = user_id, mc_token = mc_token)
+        self.session.add(new_map)
+        self.session.commit()
+
 
     """Taxes"""
 
@@ -746,6 +775,9 @@ class Backend:
         return self._one_or_none(select(Economy).where(Economy.currency_name == name))
         
 
+    def get_economy_by_id(self, economy_id: UUID):
+        return self._one_or_none(select(Economy).where(Economy.economy_id == economy_id))
+
     def register_guild(self, user: Member, guild_id: int, economy: Economy):
         if not self.has_permission(user, Permissions.MANAGE_ECONOMIES, economy=economy):
             raise BackendError("You do not have permission to manage economies")
@@ -843,8 +875,13 @@ class Backend:
     def get_account_by_name(self, account_name: str, economy: Economy) -> Account | None:
         return self._one_or_none(select(Account).where(Account.account_name == account_name).where(Account.economy_id == economy.economy_id).where(Account.deleted==False))
 
- 
+    def get_account_by_id(self, account_id: UUID) -> Account | None:
+        return self._one_or_none(select(Account).where(Account.account_id == account_id))
+
+
+
     """Transfers"""
+
 
     def get_transaction_log(self, user: Member, account: Account, limit=None): 
         if not self.has_permission(user, Permissions.VIEW_BALANCE, account=account):
