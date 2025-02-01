@@ -39,7 +39,6 @@ class DiscordBackendInterface(Backend):
     def __init__(self, bot, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.bot = bot
-        
 
     def get_responder(self, interaction):
         '''
@@ -69,7 +68,7 @@ class DiscordBackendInterface(Backend):
         user = await self.bot.fetch_user(user_id)
         dms = user.dm_channel if user.dm_channel else await user.create_dm()
         return dms
-        
+
 
     @LoopAdder
     async def notify_user(self, user_id, message, title, thumbnail=None):
@@ -79,9 +78,6 @@ class DiscordBackendInterface(Backend):
         embed.set_footer(text="This message was sent by a bot and is probably highly important")
         dms = await self.get_user_dms(user_id)
         await dms.send(embed=embed)
-        
-
-    
 
 
 

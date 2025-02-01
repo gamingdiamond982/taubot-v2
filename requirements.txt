@@ -1,6 +1,7 @@
 SQLAlchemy
 discord
 psycopg2-binary
-
+pyjwt
+cryptography
 
 
