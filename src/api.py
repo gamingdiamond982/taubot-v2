@@ -28,10 +28,6 @@ def generate_key(user_id):
     }
     return jwt.encode(claims, private_key, algorithm="RS512")
 
-
-
-
-
 @web.middleware
 async def authenticate(request, handler):
     rel_url = request.rel_url
@@ -161,3 +157,5 @@ def init_app():
     app = web.Application(middlewares=[authenticate])
     app.add_routes(routes)
     return app
+
+
