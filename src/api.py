@@ -154,6 +154,7 @@ async def create_transaction(request, actor_id=None):
 
 
 def init_app():
+    print(generate_key(529676139837521920))
     app = web.Application(middlewares=[authenticate])
     app.add_routes(routes)
     return app
