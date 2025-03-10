@@ -22,27 +22,21 @@ from discord import Colour
 from types import CoroutineType
 import api
 
-
-
 red = Colour.red
 yellow = Colour.yellow
 blue = Colour.blue
 orange = Colour.orange
 green = Colour.green
 
-
 init_time = datetime.datetime.now()
 syncing = False
 use_api = False
 
-
-discord_id_regex = re.compile('\A<@!?\d*>\Z') # a regex that matches a discord id
+discord_id_regex = re.compile('^<@!?[0-9]*>$')  # a regex that matches a discord id
 
 id_extractor = re.compile('[<@!>]*')
 
-currency_regex = re.compile('^[0-9]*([\.,][0-9]{1,2}0*)?$')
-
-
+currency_regex = re.compile('^[0-9]*([.,][0-9]{1,2}0*)?$')
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -79,29 +73,18 @@ class WebhookHandler(logging.Handler):
         asyncio.get_event_loop().create_task(self.send(embed=embed))
 
 
-
-
-
-
-
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
-test_guild = discord.Object(id=1236137485554155612) # Change to None for deployment 
+test_guild = discord.Object(id=1236137485554155612)  # Change to None for deployment
 
 intents = discord.Intents.default()
 intents.message_content = True
 
-
 login_map: dict[int, Account] = {}
 
+tick_time = datetime.time(hour=0,
+                          minute=0)  # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
 
-
-
-tick_time = datetime.time(hour=0, minute=0) # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
-
-backend = None # Stop any fucky undefined errors
-
-
-
+backend = None  # Stop any fucky undefined errors
 
 
 def get_account(member):
@@ -118,13 +101,11 @@ def get_account(member):
     return acc
 
 
-
 def create_embed(title, message, colour=None):
     colour = colour if colour else discord.Colour.blue()
     embed = discord.Embed(colour=colour)
     embed.add_field(name=title, value=message)
     return embed
-
 
 
 def get_account_from_name(name, economy):
@@ -142,9 +123,11 @@ def get_account_from_name(name, economy):
 class ParseException(Exception):
     pass
 
+
 def parse_amount(amount: str) -> int:
     if not currency_regex.match(amount):
-        raise ParseException("Invalid currency value, please ensure you do not have more than two decimal places of precision")
+        raise ParseException(
+            "Invalid currency value, please ensure you do not have more than two decimal places of precision")
     parts = amount.split('.')
     if len(parts) == 1:
         return int(parts[0]) * 100
@@ -152,9 +135,10 @@ def parse_amount(amount: str) -> int:
         part = parts[1]
         part = part.rstrip('0')
         part = part.ljust(2, '0')
-        return (int(parts[0])*100) + int(part)
+        return (int(parts[0]) * 100) + int(part)
     else:
         raise ParseException("Invalid currency value")
+
 
 bot = commands.Bot(intents=intents, help_command=None, command_prefix='!')
 
@@ -184,15 +168,16 @@ async def on_ready():
 
 @bot.tree.command(name="ping", description="ping the bot to check if it's online", guild=test_guild)
 @app_commands.describe(debug="Whether or not to display debug info")
-async def ping(interaction: discord.Interaction, debug: bool=False):
+async def ping(interaction: discord.Interaction, debug: bool = False):
     if not debug:
         await interaction.response.send_message(f'Pong!')
         return
 
     ping = datetime.timedelta
     now = datetime.datetime.now(datetime.timezone.utc)
-    keys = ["Connected to Discord: ","Backend Exists: ","Connected to Database: ","Ping: ","Uptime: "]
-    values = [True, backend is not None, backend is not None, str((now-interaction.created_at).microseconds)+'ms',str(datetime.datetime.now()-init_time)]
+    keys = ["Connected to Discord: ", "Backend Exists: ", "Connected to Database: ", "Ping: ", "Uptime: "]
+    values = [True, backend is not None, backend is not None, str((now - interaction.created_at).microseconds) + 'ms',
+              str(datetime.datetime.now() - init_time)]
     good = True
     if backend is not None:
         try:
@@ -210,7 +195,7 @@ async def ping(interaction: discord.Interaction, debug: bool=False):
 
     def proccess(value):
         if type(value) == bool:
-            return '🟢' if value else '🔴' # My vim setup on this laptop isn't rendering these right, but they are the unicode emoji for a green circle and a red circle respectively
+            return '🟢' if value else '🔴'  # My vim setup on this laptop isn't rendering these right, but they are the unicode emoji for a green circle and a red circle respectively
         else:
             return value
 
@@ -225,8 +210,6 @@ async def ping(interaction: discord.Interaction, debug: bool=False):
     await interaction.response.send_message(embed=embed)
 
 
-
-
 @bot.tree.command(name="create_economy", description="Creates a new economy", guild=test_guild)
 @app_commands.describe(economy_name="The name of the economy")
 @app_commands.describe(currency_unit="The unit of currency to be used in the economy")
@@ -238,7 +221,9 @@ async def create_economy(interaction: discord.Interaction, economy_name: str, cu
     except BackendError as e:
         await responder(message=f"Could not create a new economy : {e}", colour=red())
 
-@bot.tree.command(name="list_economies", description="lists all of the currently registered economies", guild=test_guild)
+
+@bot.tree.command(name="list_economies", description="lists all of the currently registered economies",
+                  guild=test_guild)
 async def list_economies(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     economies = backend.get_economies()
@@ -251,7 +236,9 @@ async def list_economies(interaction: discord.Interaction):
     embed.add_field(name='guilds present', value=num_guilds, inline=True)
     await responder(embed=embed)
 
-@bot.tree.command(name='join_economy', description="registers this guild as a member of a named economy", guild=test_guild)
+
+@bot.tree.command(name='join_economy', description="registers this guild as a member of a named economy",
+                  guild=test_guild)
 @app_commands.describe(economy_name="The name of the economy you want to join")
 async def join_economy(interaction: discord.Interaction, economy_name: str):
     responder = backend.get_responder(interaction)
@@ -261,6 +248,7 @@ async def join_economy(interaction: discord.Interaction, economy_name: str):
         return
     backend.register_guild(interaction.user, interaction.guild.id, economy)
     await responder(message=f'Successfully joined economy: {economy_name}')
+
 
 @bot.tree.command(name='delete_economy', description="Deletes an economy", guild=test_guild)
 @app_commands.describe(economy_name='The name of the economy')
@@ -277,6 +265,7 @@ async def delete_economy(interaction: discord.Interaction, economy_name: str):
     except BackendError as e:
         await responder(message=f"The economy could not be deleted: {e}", colour=red())
 
+
 @bot.tree.command(name="link", description="Links your mc account with taubot", guild=test_guild)
 @app_commands.describe(token="The token generated by running /link on the mc server")
 async def link_account(interaction: discord.Interaction, token: str):
@@ -287,29 +276,31 @@ async def link_account(interaction: discord.Interaction, token: str):
     except BackendError as e:
         await responder(message=f"Could not link your account due to : {e}", colour=red())
 
+
 @bot.tree.command(name='open_account', description="opens a user account in this guild's economy", guild=test_guild)
 async def create_account(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if economy is None:
-        await responder(message='This guild is not registered to an economy so an account could not be opened here', colour = orange())
+        await responder(message='This guild is not registered to an economy so an account could not be opened here',
+                        colour=orange())
         return
     try:
         backend.create_account(interaction.user, interaction.user.id, economy)
         await responder(message='Your account was opened successfully')
     except BackendError as e:
-         await responder(message=f'The account could not be opened: {e}', colour=red())
+        await responder(message=f'The account could not be opened: {e}', colour=red())
 
 
-
-
-@bot.tree.command(name='login', description="login to an account that is not your's in order to act as your behalf", guild=test_guild)
+@bot.tree.command(name='login', description="login to an account that is not your's in order to act as your behalf",
+                  guild=test_guild)
 @app_commands.describe(account_name="The account to login as")
-async def login(interaction: discord.Interaction, account_name: str|None):
+async def login(interaction: discord.Interaction, account_name: str | None):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
-    account = get_account_from_name(account_name, economy) if account_name is not None else backend.get_account_from_interaction(interaction)
-
+    account = get_account_from_name(account_name,
+                                    economy) if account_name is not None else backend.get_account_from_interaction(
+        interaction)
 
     if account is None:
         await responder(message=f'We could not find any account under the name : {account_name}')
@@ -320,7 +311,9 @@ async def login(interaction: discord.Interaction, account_name: str|None):
         return
 
     login_map[interaction.user.id] = account
-    await responder(message=f'You have now logged in as {account.account_name}\n To log back into your user account simply run `/login` without any arguments')
+    await responder(
+        message=f'You have now logged in as {account.account_name}\n To log back into your user account simply run `/login` without any arguments')
+
 
 @bot.tree.command(name='whoami', description="tells you who you are logged in as", guild=test_guild)
 async def whoami(interaction: discord.Interaction):
@@ -330,23 +323,25 @@ async def whoami(interaction: discord.Interaction):
         await responder(message="You do not have an account in this economy")
         return
 
-
     await responder(message=f"You are acting as {me.account_name}")
-
 
 
 @bot.tree.command(name='open_special_account', guild=test_guild)
 @app_commands.describe(owner="The owner of the new account")
 @app_commands.describe(account_name="The name of the account to open")
 @app_commands.describe(account_type="The type of account to open")
-async def open_special_account(interaction: discord.Interaction, owner: discord.Member|discord.Role|None, account_name: str, account_type: AccountType):
-    responder=backend.get_responder(interaction)
+async def open_special_account(interaction: discord.Interaction, owner: discord.Member | discord.Role | None,
+                               account_name: str, account_type: AccountType):
+    responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if economy is None:
-        await responder(message="This guild is not registered to an economy, therefore an account cannot be opened here", colour=red())
+        await responder(
+            message="This guild is not registered to an economy, therefore an account cannot be opened here",
+            colour=red())
         return
     try:
-        backend.create_account(interaction.user, owner.id if owner is not None else None, economy, name=account_name, account_type = account_type)
+        backend.create_account(interaction.user, owner.id if owner is not None else None, economy, name=account_name,
+                               account_type=account_type)
         await responder(message="Account opened successfully")
     except BackendError as e:
         await responder(message=f"Could not open account due to : {e}", colour=red())
@@ -354,7 +349,7 @@ async def open_special_account(interaction: discord.Interaction, owner: discord.
 
 @bot.tree.command(name="close_account", guild=test_guild)
 @app_commands.describe(account_name="The name of the account you want to close")
-async def close_account(interaction: discord.Interaction, account_name: str|None):
+async def close_account(interaction: discord.Interaction, account_name: str | None):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if account_name is None:
@@ -395,7 +390,8 @@ async def get_balance(interaction: discord.Interaction):
 @app_commands.describe(amount="The amount to transfer")
 @app_commands.describe(to_account="The account to transfer the funds too")
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
-async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str, transaction_type: TransactionType=TransactionType.PERSONAL):
+async def transfer_funds(interaction: discord.Interaction, amount: str, to_account: str,
+                         transaction_type: TransactionType = TransactionType.PERSONAL):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if economy is None:
@@ -410,12 +406,11 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
     if to_account is None:
         await responder(message='The account you tried to transfer too does not exist', colour=red())
         return
-    
 
     try:
         backend.perform_transaction(interaction.user, from_account, to_account, parse_amount(amount), transaction_type)
         await responder('Successfully performed transaction')
-    except (BackendError, ParseException) as e: 
+    except (BackendError, ParseException) as e:
         await responder(message=f'Failed to perform transaction due to : {e}', colour=red())
 
 
@@ -425,24 +420,33 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
 @app_commands.describe(payment_interval="How often you want to perform the transaction in days")
 @app_commands.describe(number_of_payments="The number of payments you want to make")
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
-async def create_recurring_transfer(interaction: discord.Interaction, amount: str, to_account: str, payment_interval: int, number_of_payments: int|None, transaction_type:TransactionType=TransactionType.PERSONAL):
+async def create_recurring_transfer(interaction: discord.Interaction, amount: str, to_account: str,
+                                    payment_interval: int, number_of_payments: int | None,
+                                    transaction_type: TransactionType = TransactionType.PERSONAL):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if economy is None:
-        await interaction.response.send_message(embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()), ephemeral=True)
+        await interaction.response.send_message(
+            embed=create_embed('transfer', 'this guild is not registered to an economy', discord.colour.red()),
+            ephemeral=True)
 
     to_account = get_account_from_name(to_account, economy)
     from_account = get_account(interaction.user)
     if from_account is None:
-        await interaction.response.send_message(embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()), ephemeral=True)
+        await interaction.response.send_message(
+            embed=create_embed('transfer', 'you do not have an account to transfer from', discord.colour.red()),
+            ephemeral=True)
         return
 
     if to_account is None:
-        await interaction.response.send_message(embed=create_embed('transfer', 'the account you tried to transfer too does not exist', discord.colour.red()), ephemeral=True)
+        await interaction.response.send_message(
+            embed=create_embed('transfer', 'the account you tried to transfer too does not exist',
+                               discord.colour.red()), ephemeral=True)
         return
 
     try:
-        backend.create_recurring_transfer(interaction.user, from_account, to_account, parse_amount(amount), payment_interval, number_of_payments, transaction_type)
+        backend.create_recurring_transfer(interaction.user, from_account, to_account, parse_amount(amount),
+                                          payment_interval, number_of_payments, transaction_type)
         await responder('Successfully created a recurring transfer')
     except (BackendError, ParseException) as e:
         await responder(message=f"Failed to create a recurring transfer due to: {e}", colour=red())
@@ -450,7 +454,7 @@ async def create_recurring_transfer(interaction: discord.Interaction, amount: st
 
 @bot.tree.command(name='view_permissions', guild=test_guild)
 @app_commands.describe(user='The user you want to view the permissions of')
-async def view_permissions(interaction: discord.Interaction, user: discord.Member|discord.Role):
+async def view_permissions(interaction: discord.Interaction, user: discord.Member | discord.Role):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     permissions = backend.get_permissions(user, economy)
@@ -464,23 +468,21 @@ async def view_permissions(interaction: discord.Interaction, user: discord.Membe
     await responder(embed=embed)
 
 
-
-
 class PermissionState(Enum):
     DISALLOWED = 0
     ALLOWED = 1
     DEFAULT = 2
 
 
-
-
 @bot.tree.command(name="update_permission", guild=test_guild)
-@app_commands.describe(affects = "What you want to update the permissions for be it a user or role")
+@app_commands.describe(affects="What you want to update the permissions for be it a user or role")
 @app_commands.describe(permission="The permission to update")
-@app_commands.describe(account = "The account the permission should apply too")
+@app_commands.describe(account="The account the permission should apply too")
 @app_commands.describe(state="The state you want to update the permission too")
 @app_commands.describe(universal="Whether or not the scope is restricted to this economy")
-async def update_permissions(interaction: discord.Interaction, affects: discord.Member | discord.Role, permission: Permissions, state:PermissionState, account: str|None, universal: bool = False):
+async def update_permissions(interaction: discord.Interaction, affects: discord.Member | discord.Role,
+                             permission: Permissions, state: PermissionState, account: str | None,
+                             universal: bool = False):
     economy = backend.get_guild_economy(interaction.guild.id) if not universal else None
     responder = backend.get_responder(interaction)
     if account is not None:
@@ -493,7 +495,8 @@ async def update_permissions(interaction: discord.Interaction, affects: discord.
             backend.reset_permission(interaction.user, affects.id, permission, account, economy=economy)
         else:
             allowed = bool(state.value)
-            backend.change_permissions(interaction.user, affects.id, permission, account, economy=economy, allowed=allowed)
+            backend.change_permissions(interaction.user, affects.id, permission, account, economy=economy,
+                                       allowed=allowed)
         await responder(message='successfully updated permissions')
     except BackendError as e:
         await responder(f'could not update permissions due to : {e}', colour=red())
@@ -505,7 +508,6 @@ async def update_permissions(interaction: discord.Interaction, affects: discord.
 async def print_money(interaction: discord.Interaction, to_account: str, amount: str):
     economy = backend.get_guild_economy(interaction.guild.id)
     responder = backend.get_responder(interaction)
-
 
     if economy is None:
         await responder('This guild is not registered to an economy.', colour=red())
@@ -527,7 +529,7 @@ async def print_money(interaction: discord.Interaction, to_account: str, amount:
 @app_commands.describe(from_account="The account you want to remove funds from")
 @app_commands.describe(amount="The amount you want to remove")
 async def remove_funds(interaction: discord.Interaction, from_account: str, amount: str):
-    responder=backend.get_responder(interaction)
+    responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
     if economy is None:
         await responder(message="This guild is not registered to an economy.", colour=red())
@@ -543,7 +545,7 @@ async def remove_funds(interaction: discord.Interaction, from_account: str, amou
         backend.remove_funds(interaction.user, from_account, parse_amount(amount))
         await responder(message="Successfully removed funds")
     except (BackendError, ParseException) as e:
-        await responder(message = f'Could not remove funds due to : {e}', colour=red())
+        await responder(message=f'Could not remove funds due to : {e}', colour=red())
 
 
 @bot.tree.command(name="create_tax_bracket", guild=test_guild)
@@ -551,12 +553,13 @@ async def remove_funds(interaction: discord.Interaction, from_account: str, amou
 @app_commands.describe(affected_type="The type of account that is affected by your tax")
 @app_commands.describe(tax_type="The type of tax you wish to create")
 @app_commands.describe(bracket_start="The starting point for the tax bracket")
-@app_commands.describe(bracket_end = "The ending point for the tax bracket")
+@app_commands.describe(bracket_end="The ending point for the tax bracket")
 @app_commands.describe(rate="The % of the income between the brackets that you wish to tax")
 @app_commands.describe(to_account="The account you wish to send the revenue from taxation too")
-async def create_tax_bracket(interaction: discord.Interaction, tax_name: str,  affected_type: AccountType, tax_type: TaxType, bracket_start: str, bracket_end: str, rate: int, to_account: str):
+async def create_tax_bracket(interaction: discord.Interaction, tax_name: str, affected_type: AccountType,
+                             tax_type: TaxType, bracket_start: str, bracket_end: str, rate: int, to_account: str):
     economy = backend.get_guild_economy(interaction.guild.id)
-    responder=backend.get_responder(interaction)
+    responder = backend.get_responder(interaction)
     if economy is None:
         await responder(message='This guild is not registered to an economy.', colour=red())
         return
@@ -568,11 +571,11 @@ async def create_tax_bracket(interaction: discord.Interaction, tax_name: str,  a
         return
 
     try:
-        backend.create_tax_bracket(interaction.user, tax_name, affected_type, tax_type, parse_amount(bracket_start), parse_amount(bracket_end), rate, to_account)
+        backend.create_tax_bracket(interaction.user, tax_name, affected_type, tax_type, parse_amount(bracket_start),
+                                   parse_amount(bracket_end), rate, to_account)
         await responder(message="Successfully created a tax bracket")
     except (BackendError, ParseException) as e:
         await responder(message=f"Could not create a tax bracket due to : {e}", colour=red())
-
 
 
 @bot.tree.command(name="delete_tax_bracket", guild=test_guild)
@@ -601,8 +604,9 @@ async def perform_tax(interaction: discord.Interaction):
         backend.perform_tax(interaction.user, economy)
         await responder(message='Tax performed succesfully', colour=red())
     except BackendError as e:
-        await responder(message=f'could not perform taxes due to : {e}\n note: no changes have been made to any balances', colour=red())
-
+        await responder(
+            message=f'could not perform taxes due to : {e}\n note: no changes have been made to any balances',
+            colour=red())
 
 
 @bot.tree.command(name='toggle_ephemeral', guild=test_guild)
@@ -613,9 +617,11 @@ async def toggle_ephemeral(interaction: discord.Interaction):
 
 
 @bot.tree.command(name='view_transaction_log', guild=test_guild)
-@app_commands.describe(account="The account you want to view the transaction logs of, leave empty to default to the account your currently logged in as.")
-@app_commands.describe(limit="The number of transactions back you wish too see, note: will not show transactions before this feature was added")
-async def view_transaction_log(interaction: discord.Interaction, account: str|None, limit: int=10):
+@app_commands.describe(
+    account="The account you want to view the transaction logs of, leave empty to default to the account your currently logged in as.")
+@app_commands.describe(
+    limit="The number of transactions back you wish too see, note: will not show transactions before this feature was added")
+async def view_transaction_log(interaction: discord.Interaction, account: str | None, limit: int = 10):
     economy = backend.get_guild_economy(interaction.guild.id)
     responder = backend.get_responder(interaction)
 
@@ -627,11 +633,12 @@ async def view_transaction_log(interaction: discord.Interaction, account: str|No
         transactions = backend.get_transaction_log(interaction.user, account)
     except BackendError as e:
         await responder(message=f"{e}")
-    entries = '\n'.join([f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}t-> {t.destination_account.get_name()}' for t in transactions])
+    entries = '\n'.join([
+                            f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}t-> {t.destination_account.get_name()}'
+                            for t in transactions])
     if len(transactions) == 0:
-        entries='No transactions have been logged yet'
+        entries = 'No transactions have been logged yet'
     await responder(message=entries)
-
 
 
 @bot.tree.command(name="subscribe", guild=test_guild)
@@ -651,7 +658,7 @@ async def subscribe(interaction: discord.Interaction, account: str):
 
 @bot.tree.command(name="unsubscribe", guild=test_guild)
 @app_commands.describe(account="The account you want to unsubscribe from.")
-async def unsubscribe(interaction: discord.Interaction, account:str):
+async def unsubscribe(interaction: discord.Interaction, account: str):
     economy = backend.get_guild_economy(interaction.guild.id)
     responder = backend.get_responder(interaction)
     if economy is None:
@@ -663,16 +670,10 @@ async def unsubscribe(interaction: discord.Interaction, account:str):
     await responder(message=f"You will no longer receive balance updates from {account.account_name}.")
 
 
-
 def setup_webhook(logger, webhook_url, level):
     wh = WebhookHandler(webhook_url)
     wh.setLevel(level)
     logger.addHandler(wh)
-
-
-
-
-
 
 
 def load_config():
@@ -693,8 +694,6 @@ def load_config():
             return json.load(file)
     except:
         return {}
-
-
 
 
 if __name__ == '__main__':
@@ -719,6 +718,3 @@ if __name__ == '__main__':
         setup_webhook(backend_logger, private_webhook_url, 51)
 
     bot.run(token, log_handler=None)
-
-
-

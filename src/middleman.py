@@ -2,26 +2,8 @@ import discord
 import asyncio
 from backend import Backend, BackendError, Account, Permissions, AccountType, TransactionType, TaxType, frmt
 
-"""
-class LoopAdder:
-    \"\"\"
-    Allows me to synchronously call async functions when I do not care about the return result
-    declaratavely tells asyncio to "go do this at some point" when called.
-    \"\"\"
-    def __init__(self, func):
-        self.func = func
 
-    def __call__(self, *args, **kwargs):
-        print(args)
-        print(kwargs)
-        asyncio.get_event_loop().create_task(self.func(*args, **kwargs))
-
-    def get_async_func(self):
-        return self.func
-
-"""
-
-def LoopAdder(func):
+def loop_adder(func):
     def excecute(*args, **kwargs):
         asyncio.get_event_loop().create_task(func(*args, **kwargs))
     return excecute
@@ -47,7 +29,7 @@ class DiscordBackendInterface(Backend):
         title = interaction.command.name
         async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url,**kwargs):
             colour = colour if colour is not None else discord.Colour.yellow()
-            embed = discord.Embed(colour=discord.Colour.yellow()) if embed is None else embed
+            embed = discord.Embed(colour=colour) if embed is None else embed
             embed.set_thumbnail(url=thumbnail)
             embed.add_field(name=title, value=message) if message is not None else None
             embed.set_footer(text="This message was sent by a bot and is probably highly important")
@@ -70,7 +52,7 @@ class DiscordBackendInterface(Backend):
         return dms
 
 
-    @LoopAdder
+    @loop_adder
     async def notify_user(self, user_id, message, title, thumbnail=None):
         embed = discord.Embed(colour=discord.Colour.yellow())
         embed.set_thumbnail(url=thumbnail)

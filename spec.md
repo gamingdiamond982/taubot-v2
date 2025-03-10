@@ -55,6 +55,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 
 
 **economies**
+
 | Column Name    | Column Type | Primary Key | Foreign Key |
 |----------------|-------------|-------------|-------------|
 | economy\_id    | UUID        | True        |             |
@@ -63,6 +64,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 
 
 **guild_economies**
+
 | Column Name | Column Type | Primary Key | Foreign Key           |
 |-------------|-------------|-------------|-----------------------|
 | guild\_id   | u64         | True        |                       |
@@ -71,6 +73,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 
 
 **accounts**
+
 | Column Name   | Column Type | Primary Key | Foreign Key           |
 |---------------|-------------|-------------|-----------------------|
 | account\_id   | UUID        | True        |                       |
@@ -84,6 +87,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 
 
 **permissions**
+
 | Column Name      | Column Type | Primary Key | Foreign Key           |
 |------------------|-------------|-------------|-----------------------|
 | entry\_id        | UUID        | True        |                       |
@@ -95,6 +99,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 
 
 **taxes**
+
 | Column Name    | Column Type | Primary Key | Foreign Key           |
 |----------------|-------------|-------------|-----------------------|
 | entry\_id      | UUID        | True        |                       |
@@ -106,6 +111,7 @@ Column types are just placeholders and don't necessarily line up with SQL types.
 
 
 **recurring_transfers**
+
 | Column Name               | Column Type | Primary Key | Foreign Key          |
 |---------------------------|-------------|-------------|----------------------|
 | entry\_id                 | UUID        | True        |                      |

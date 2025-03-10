@@ -7,7 +7,6 @@ from uuid import UUID
 from backend import StubUser, Permissions
 
 trusted_public_keys = {}
-private_key = b''
 routes = web.RouteTableDef()
 INSECURE = (
     re.compile('^/mc/'),
@@ -16,38 +15,40 @@ backend = None
 
 trusted_pubk_fps = os.listdir('./keys/public-keys/')
 for fp in trusted_pubk_fps:
-    trusted_public_keys[fp] = open('./keys/public-keys/'+fp,'rb').read()
-private_key = open('./keys/jwt-key', 'rb').read()
+    trusted_public_keys[fp] = open('./keys/public-keys/' + fp, 'rb').read()
+
 
 def generate_key(user_id):
+    private_key = open('./keys/jwt-key', 'rb').read()
     claims = {
         "iss": "TB",
         "iat": time.time(),
-        "exp": time.time() + 60*60*24,
+        "exp": time.time() + 60 * 60 * 24,
         "uid": str(user_id)
     }
     return jwt.encode(claims, private_key, algorithm="RS512")
+
 
 @web.middleware
 async def authenticate(request, handler):
     rel_url = request.rel_url
     print(str(rel_url))
-    if [regex.match(str(rel_url)) for regex in INSECURE] != [None]*len(INSECURE):
+    if [regex.match(str(rel_url)) for regex in INSECURE] != [None] * len(INSECURE):
         return await handler(request)
     try:
         token = request.headers["authorization"]
     except KeyError:
         raise web.HTTPUnauthorized()
     claims = jwt.decode(token, options={"verify_signature": False})
-    print(claims)
-    public_key = trusted_public_keys[claims['iss']+'.pub']
+    public_key = trusted_public_keys[claims['iss'] + '.pub']
     options = {
         "require": ["exp", "iat", "uid"],
         "verify_iss": True,
         "verify_exp": True,
     }
-    claims = jwt.decode(token, public_key, algorithms=["RS512"])
+    claims = jwt.decode(token, public_key, algorithms=["RS512"], options=options)
     return await handler(request, actor_id=int(claims["uid"]))
+
 
 @routes.get('/mc/{mc_token}')
 async def get_user_id(request):
@@ -77,6 +78,7 @@ async def get_account_id(request, actor_id=None):
 
     return web.json_response({"personal_account_id": str(account.account_id)})
 
+
 @routes.get("/economies/{economy_id}/accounts/by-name/{account_name}")
 async def get_account_by_name(request, actor_id=None):
     try:
@@ -96,7 +98,6 @@ async def get_account_by_name(request, actor_id=None):
         result["balance"] = account.balance
     print(result)
     return web.json_response(result)
-
 
 
 @routes.get("/economies/{economy_id}/accounts/{account_id}")
@@ -152,10 +153,7 @@ async def create_transaction(request, actor_id=None):
     return web.Response(text="200")
 
 
-
 def init_app():
     app = web.Application(middlewares=[authenticate])
     app.add_routes(routes)
     return app
-
-

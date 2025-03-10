@@ -1,35 +1,24 @@
+import logging
 import time
 from datetime import datetime
-import logging
-import discord
-from discord import Member # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
-
+from enum import Enum
+from typing import Any
 from typing import List
 from typing import Optional
-from typing import Callable
-
-from enum import Enum
 from uuid import UUID, uuid4
-from sqlalchemy import func
 
-from sqlalchemy import String, BigInteger, DateTime, JSON # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
-
-from sqlalchemy import create_engine
-from sqlalchemy import select, delete, update
-
+from discord import Member  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
 from sqlalchemy import ForeignKey
+from sqlalchemy import String, BigInteger, DateTime, \
+    JSON  # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
+from sqlalchemy import create_engine
+from sqlalchemy import func
+from sqlalchemy import select, delete, update
+from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import relationship
-
-from sqlalchemy.orm import Session
-from sqlalchemy.orm import DeclarativeBase
-
-from sqlalchemy.exc import MultipleResultsFound
-
-from typing import Any
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -325,11 +314,10 @@ class Backend:
 
     async def tick(self):
         """
-        Triggers a tick in the server should be called externally
+        Triggers a tick in the server
         Must be triggered externally        
         """
 
-        messages: list[tuple[int, str]] = []
         tick_time = time.time()
         stmt = select(RecurringTransfer).where((RecurringTransfer.last_payment_timestamp + RecurringTransfer.payment_interval) <= tick_time)
         transfers = self.session.execute(stmt).all()
@@ -350,7 +338,7 @@ class Backend:
                     payments_left -= 1
                 except BackendError as e:
                     logger.log(PRIVATE_LOG, f'Failed to perform recurring transaction of {frmt(transfer.amount)} from {transfer.from_account.account_name} to {transfer.to_account.account_name} due to : {e}')
-                    self.notify_user(transfer.authorisor_id, "Your recurring transaction of {frmt(transfer.amount)} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}")
+                    self.notify_user(transfer.authorisor_id, "Your recurring transaction of {frmt(transfer.amount)} every {transfer.payment_interval/60/60/24}days to {transfer.to_account.account_name} was cancelled due to: {e}", "Failed Reccurring Transfer")
                     self.session.delete(transfer)
             else: # for those unfamiliar with for/else this is not executed if the loop breaks
                 transfer.number_of_payments_left = payments_left
@@ -807,7 +795,7 @@ class Backend:
     def get_guild_ids(self, economy: Economy) -> List[int]:
         return [i.guild_id for i in economy.guilds]
 
-    def delete_economy(self, user: Member, economy: Economy) -> bool:
+    def delete_economy(self, user: Member, economy: Economy) -> None:
         econ_id = economy.economy_id if economy is not None else None
         if not self.has_permission(user, Permissions.MANAGE_ECONOMIES, economy=economy):
             raise BackendError("You do not have permission to delete this economy")
@@ -894,7 +882,7 @@ class Backend:
     
 
     
-    def create_recurring_transfer(self, user: Member, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> bool:
+    def create_recurring_transfer(self, user: Member, from_account: Account, to_account: Account, amount: int, payment_interval: int, number_of_payments: int = None, transaction_type: TransactionType = TransactionType.INCOME) -> None:
         if not self.has_permission(user, Permissions.TRANSFER_FUNDS, account=from_account, economy=from_account.economy):
             raise BackendError("You do not have permission to transfer funds on this account")
         rec_transfer = RecurringTransfer(
