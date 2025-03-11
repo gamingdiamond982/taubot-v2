@@ -4,7 +4,8 @@ import os
 import time
 import re
 from uuid import UUID
-from backend import StubUser, Permissions
+from backend import StubUser, Permissions, Account
+from src.backend import Backend, Transaction
 
 trusted_public_keys = {}
 routes = web.RouteTableDef()
@@ -78,6 +79,15 @@ async def get_account_id(request, actor_id=None):
 
     return web.json_response({"personal_account_id": str(account.account_id)})
 
+def encode_account(actor, account: Account):
+    assert isinstance(backend, Backend)
+    return {
+        "account_id": account.account_id,
+        "account_name": account.account_name,
+        "account_type": str(account.account_type),
+        "balance": account.balance if backend.has_permission(actor, Permissions.VIEW_BALANCE, account=account) else None
+    }
+
 
 @routes.get("/economies/{economy_id}/accounts/by-name/{account_name}")
 async def get_account_by_name(request, actor_id=None):
@@ -90,15 +100,29 @@ async def get_account_by_name(request, actor_id=None):
     if economy is None:
         raise web.HTTPNotFound()
     account = backend.get_account_by_name(account_name, economy)
+    if account is None:
+        raise web.HTTPNotFound()
     actor = await backend.get_member(actor_id, economy.owner_guild_id)
     actor = actor if actor else StubUser(actor_id)
-    result = {"account_id": str(account.account_id)}
+    return web.json_response(encode_account(actor, account))
 
-    if backend.has_permission(actor, Permissions.VIEW_BALANCE, account=account):
-        result["balance"] = account.balance
-    print(result)
-    return web.json_response(result)
-
+@routes.get("/economies/{economy_id}/users/{user_id}/personal_account")
+async def get_user_account(request, actor_id=None):
+    assert isinstance(backend, Backend)
+    try:
+        economy_id = UUID(request.match_info["economy_id"])
+        user_id = int(request.match_info["user_id"])
+    except ValueError:
+        raise web.HTTPNotFound()
+    economy = backend.get_economy_by_id(economy_id)
+    if economy is None:
+        raise web.HTTPNotFound()
+    account = backend.get_user_account(user_id, economy)
+    if account is None:
+        raise web.HTTPNotFound()
+    actor = await backend.get_member(actor_id, economy.owner_guild_id)
+    actor = actor if actor else StubUser(actor_id)
+    return web.json_response(encode_account(actor, account))
 
 @routes.get("/economies/{economy_id}/accounts/{account_id}")
 async def get_account(request, actor_id=None):
@@ -118,12 +142,43 @@ async def get_account(request, actor_id=None):
 
     actor = await backend.get_member(actor_id, economy.owner_guild_id)
     actor = actor if actor else StubUser(actor_id)
-    result = {"account_name": account.account_name}
+    return web.json_response(encode_account(actor, account))
 
-    if backend.has_permission(actor, Permissions.VIEW_BALANCE, account=account):
-        result["balance"] = account.balance
 
+def encode_transaction(t: Transaction):
+    return {
+            "actor_id": str(t.actor_id),
+            "timestamp": str(t.timestamp.timestamp()),
+            "from_account": str(t.target_account_id),
+            "to_account": str(t.destination_account_id),
+            "amount": t.amount
+        }
+
+@routes.get("/economies/{economy_id}/accounts/{account_id}/transactions")
+async def get_account_transactions(request, actor_id=None):
+    try:
+        economy_id = UUID(request.match_info["economy_id"])
+        account_id = UUID(request.match_info["account_id"])
+    except ValueError:
+        raise web.HTTPNotFound()
+
+    economy = backend.get_economy_by_id(economy_id)
+    if economy is None:
+        raise web.HTTPNotFound()
+
+    account = backend.get_account_by_id(account_id)
+    if account is None:
+        raise web.HTTPNotFound()
+
+    actor = await backend.get_member(actor_id, economy.owner_guild_id)
+    actor = actor if actor else StubUser(actor_id)
+    if not backend.has_permission(actor, Permissions.VIEW_BALANCE, account=account):
+        raise web.HTTPUnauthorized()
+
+    transactions = backend.get_transaction_log(actor, account, limit=request.query.get("limit"))
+    result = [encode_transaction(t) for t in transactions]
     return web.json_response(result)
+
 
 
 @routes.post("/economies/{economy_id}/transactions/")
