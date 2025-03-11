@@ -372,6 +372,7 @@ async def close_account(interaction: discord.Interaction, account_name: str | No
 async def get_balance(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
+    print(economy.economy_id)
     if economy is None:
         await responder(message='This guild is not registered to an economy', colour=red())
         return
