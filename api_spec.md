@@ -194,7 +194,10 @@ may also be performed without the limit paramater in which case all entries will
 ##### Example cURL
 
 > ```sh
-> $ curl "https://qwrky.dev/api/economies/5fb29676-ba8d-4e00-b430-8394cb48ddb8/users/529676139837521920" -H "authorization: auth_token"
+> $ curl -X POST -d '{ \
+>   "from_account": "97e27ebf-5741-4dc9-9793-5642474f5eea",\
+>   "to_account": "8c28351f-6106-4db9-a7a1-c02df7a24b8b" \
+> }' "https://qwrky.dev/api/economies/5fb29676-ba8d-4e00-b430-8394cb48ddb8/users/529676139837521920" -H "authorization: auth_token"
 > ```
 
 
