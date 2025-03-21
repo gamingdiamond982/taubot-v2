@@ -738,7 +738,6 @@ class Backend:
         if self.get_economy_by_name(currency_name):
             raise BackendError("An economy by that name already exists")
 
-        now = time.time()
         economy = Economy(economy_id=uuid4(), currency_name=currency_name, currency_unit=currency_unit, owner_guild_id = user.guild.id)
         
         if self.get_guild_economy(user.guild.id) is not None:
@@ -792,7 +791,8 @@ class Backend:
         guild = self.session.get(Guild, guild_id)
         return None if guild is None else guild.economy
 
-    def get_guild_ids(self, economy: Economy) -> List[int]:
+    @staticmethod
+    def get_guild_ids(economy: Economy) -> List[int]:
         return [i.guild_id for i in economy.guilds]
 
     def delete_economy(self, user: Member, economy: Economy) -> None:
