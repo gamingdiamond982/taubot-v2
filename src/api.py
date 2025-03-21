@@ -29,6 +29,10 @@ def generate_key(user_id):
     }
     return jwt.encode(claims, private_key, algorithm="RS512")
 
+async def get_actor(actor_id, economy):
+    actor = await backend.get_member(actor_id, economy.owner_guild_id)
+    actor = actor if actor else StubUser(actor_id)
+    return actor
 
 @web.middleware
 async def authenticate(request, handler):
@@ -76,13 +80,14 @@ async def get_account_id(request, actor_id=None):
     account = backend.get_user_account(user_id, economy)
     if account is None:
         raise web.HTTPNotFound()
-
-    return web.json_response({"personal_account_id": str(account.account_id)})
+    actor = await get_actor(actor_id, economy)
+    return web.json_response(encode_account(actor, account))
 
 def encode_account(actor, account: Account):
     assert isinstance(backend, Backend)
     return {
         "account_id": account.account_id,
+        "owner_id": str(account.owner_id),
         "account_name": account.account_name,
         "account_type": str(account.account_type),
         "balance": account.balance if backend.has_permission(actor, Permissions.VIEW_BALANCE, account=account) else None
@@ -102,27 +107,9 @@ async def get_account_by_name(request, actor_id=None):
     account = backend.get_account_by_name(account_name, economy)
     if account is None:
         raise web.HTTPNotFound()
-    actor = await backend.get_member(actor_id, economy.owner_guild_id)
-    actor = actor if actor else StubUser(actor_id)
+    actor = await get_actor(actor_id, economy)
     return web.json_response(encode_account(actor, account))
 
-@routes.get("/economies/{economy_id}/users/{user_id}/personal_account")
-async def get_user_account(request, actor_id=None):
-    assert isinstance(backend, Backend)
-    try:
-        economy_id = UUID(request.match_info["economy_id"])
-        user_id = int(request.match_info["user_id"])
-    except ValueError:
-        raise web.HTTPNotFound()
-    economy = backend.get_economy_by_id(economy_id)
-    if economy is None:
-        raise web.HTTPNotFound()
-    account = backend.get_user_account(user_id, economy)
-    if account is None:
-        raise web.HTTPNotFound()
-    actor = await backend.get_member(actor_id, economy.owner_guild_id)
-    actor = actor if actor else StubUser(actor_id)
-    return web.json_response(encode_account(actor, account))
 
 @routes.get("/economies/{economy_id}/accounts/{account_id}")
 async def get_account(request, actor_id=None):
@@ -140,15 +127,14 @@ async def get_account(request, actor_id=None):
     if account is None:
         raise web.HTTPNotFound()
 
-    actor = await backend.get_member(actor_id, economy.owner_guild_id)
-    actor = actor if actor else StubUser(actor_id)
+    actor = await get_actor(actor_id, economy)
     return web.json_response(encode_account(actor, account))
 
 
 def encode_transaction(t: Transaction):
     return {
             "actor_id": str(t.actor_id),
-            "timestamp": str(t.timestamp.timestamp()),
+            "timestamp": t.timestamp.timestamp(),
             "from_account": str(t.target_account_id),
             "to_account": str(t.destination_account_id),
             "amount": t.amount
@@ -170,8 +156,7 @@ async def get_account_transactions(request, actor_id=None):
     if account is None:
         raise web.HTTPNotFound()
 
-    actor = await backend.get_member(actor_id, economy.owner_guild_id)
-    actor = actor if actor else StubUser(actor_id)
+    actor = await get_actor(actor_id, economy)
     if not backend.has_permission(actor, Permissions.VIEW_BALANCE, account=account):
         raise web.HTTPUnauthorized()
 
@@ -195,8 +180,7 @@ async def create_transaction(request, actor_id=None):
     if set(transaction_data.keys()) != {"from_account", "to_account", "amount"}:
         raise web.HTTPBadRequest()
 
-    user = await backend.get_member(actor_id, economy.owner_guild_id)
-    user = user if user else StubUser(actor_id)
+    user = await get_actor(actor_id, economy)
 
     from_account = backend.get_account_by_id(UUID(transaction_data["from_account"]))
     to_account = backend.get_account_by_id(UUID(transaction_data["to_account"]))

@@ -23,9 +23,9 @@ class DiscordBackendInterface(Backend):
         self.bot = bot
 
     def get_responder(self, interaction):
-        '''
+        """
         Using currying to save on some of the boilerplate code we normally use
-        '''
+        """
         title = interaction.command.name
         async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url,**kwargs):
             colour = colour if colour is not None else discord.Colour.yellow()
