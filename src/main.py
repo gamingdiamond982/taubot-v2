@@ -71,7 +71,7 @@ class WebhookHandler(logging.Handler):
 
 
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
-test_guild = discord.Object(id=1236137485554155612)  # Change to None for deployment
+test_guild = None # discord.Object(id=1236137485554155612)  # Change to None for deployment
 
 intents = discord.Intents.default()
 intents.message_content = True

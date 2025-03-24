@@ -197,3 +197,7 @@ def init_app():
     app = web.Application(middlewares=[authenticate])
     app.add_routes(routes)
     return app
+
+
+if __name__ == '__main__':
+    print(generate_key(int(input('Enter the id you wish to get an API key for: '))))
