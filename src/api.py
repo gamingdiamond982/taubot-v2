@@ -89,7 +89,7 @@ async def get_account_id(request, actor_id=None):
 def encode_account(actor, account: Account):
     assert isinstance(backend, Backend)
     return {
-        "account_id": account.account_id,
+        "account_id": str(account.account_id),
         "owner_id": str(account.owner_id),
         "account_name": account.account_name,
         "account_type": str(account.account_type),
