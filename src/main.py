@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
-import time
 import sys
 import json
 from middleman import BackendError, Account, Permissions, AccountType, TransactionType, TaxType, frmt
 from middleman import DiscordBackendInterface as Backend
-from typing import Callable, Union, Awaitable, Coroutine
 import datetime
 import logging
 import aiohttp
 import re
-from time import time
 from enum import Enum
 
 from discord.ext import tasks, commands
