@@ -10,7 +10,7 @@ from backend import Backend, Transaction
 trusted_public_keys = {}
 routes = web.RouteTableDef()
 INSECURE = (
-    re.compile('^/mc/'),
+    re.compile('^/api/mc/'),
 )
 backend = None
 
@@ -55,7 +55,7 @@ async def authenticate(request, handler):
     return await handler(request, actor_id=int(claims["uid"]))
 
 
-@routes.get('/mc/{mc_token}')
+@routes.get('/api/mc/{mc_token}')
 async def get_user_id(request):
     print(backend.get_economies()[0].economy_id)
     user_id = backend.get_discord_id(request.match_info["mc_token"])
@@ -64,7 +64,7 @@ async def get_user_id(request):
     return web.json_response({"user_id": str(user_id)})
 
 
-@routes.get('/economies/{economy_id}/users/{user_id}')
+@routes.get('/api/economies/{economy_id}/users/{user_id}')
 async def get_account_id(request, actor_id=None):
     try:
         economy_id = UUID(request.match_info["economy_id"])
@@ -94,7 +94,7 @@ def encode_account(actor, account: Account):
     }
 
 
-@routes.get("/economies/{economy_id}/accounts/by-name/{account_name}")
+@routes.get("/api/economies/{economy_id}/accounts/by-name/{account_name}")
 async def get_account_by_name(request, actor_id=None):
     try:
         economy_id = UUID(request.match_info["economy_id"])
@@ -111,7 +111,7 @@ async def get_account_by_name(request, actor_id=None):
     return web.json_response(encode_account(actor, account))
 
 
-@routes.get("/economies/{economy_id}/accounts/{account_id}")
+@routes.get("/api/economies/{economy_id}/accounts/{account_id}")
 async def get_account(request, actor_id=None):
     try:
         economy_id = UUID(request.match_info["economy_id"])
@@ -140,7 +140,7 @@ def encode_transaction(t: Transaction):
             "amount": t.amount
         }
 
-@routes.get("/economies/{economy_id}/accounts/{account_id}/transactions")
+@routes.get("/api/economies/{economy_id}/accounts/{account_id}/transactions")
 async def get_account_transactions(request, actor_id=None):
     try:
         economy_id = UUID(request.match_info["economy_id"])
@@ -166,7 +166,7 @@ async def get_account_transactions(request, actor_id=None):
 
 
 
-@routes.post("/economies/{economy_id}/transactions/")
+@routes.post("/api/economies/{economy_id}/transactions/")
 async def create_transaction(request, actor_id=None):
     try:
         economy_id = UUID(request.match_info["economy_id"])
