@@ -5,7 +5,7 @@ import time
 import re
 from uuid import UUID
 from backend import StubUser, Permissions, Account
-from src.backend import Backend, Transaction
+from backend import Backend, Transaction
 
 trusted_public_keys = {}
 routes = web.RouteTableDef()
