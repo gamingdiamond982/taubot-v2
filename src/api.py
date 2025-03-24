@@ -1,3 +1,4 @@
+import discord.errors
 from aiohttp import web
 import jwt
 import os
@@ -30,8 +31,10 @@ def generate_key(user_id):
     return jwt.encode(claims, private_key, algorithm="RS512")
 
 async def get_actor(actor_id, economy):
-    actor = await backend.get_member(actor_id, economy.owner_guild_id)
-    actor = actor if actor else StubUser(actor_id)
+    try:
+        actor = await backend.get_member(actor_id, economy.owner_guild_id)
+    except discord.errors.NotFound:
+        actor = StubUser(actor_id)
     return actor
 
 @web.middleware
