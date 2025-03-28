@@ -483,7 +483,7 @@ class Backend:
         }
         tax_bracket = Tax(**kwargs)
         self.session.add(tax_bracket)
-        logger.log(PUBLIC_LOG, f"{user.mention} created a new tax bracket by the name {tax_name}")
+        logger.log(PUBLIC_LOG, f"Economy: {to_account.economy.currency_name}\n{user.mention} created a new tax bracket by the name {tax_name}")
 
         
         
@@ -513,7 +513,7 @@ class Backend:
             raise BackendError("No tax bracket of that name exists in this economy")
 
         self.session.delete(tax_bracket)
-        logger.log(PUBLIC_LOG, f"{user.mention} deleted the tax bracket {tax_name}")
+        logger.log(PUBLIC_LOG, f"Economy: {tax_bracket.economy.currency_name}\n {user.mention} deleted the tax bracket {tax_name}")
         self.session.add(Transaction(
             actor_id = user.id,
             action=Actions.UPDATE_TAX_BRACKETS,
@@ -626,11 +626,11 @@ class Backend:
                 debt = -debtor.balance
                 accumulated_tax -= debt
                 debtor.balance = 0
-                logger.log(PRIVATE_LOG, f'{debtor.account_name} failed to meet their tax obligations and still owe {frmt(debt)}')
+                logger.log(PRIVATE_LOG, f'Economy: {debtor.economy.currency_name}\n{debtor.account_name} failed to meet their tax obligations and still owe {frmt(debt)}')
             self.session.execute(update(Account).values(income_to_date=0))
             income_tax.to_account.balance += accumulated_tax
 
-        logger.log(PUBLIC_LOG, f'{user.mention} triggered a tax cycle')
+        logger.log(PUBLIC_LOG, f'Economy: {economy.currency_name}\n {user.mention} triggered a tax cycle')
         
         self.session.add(Transaction(
             actor_id = user.id,
@@ -933,7 +933,7 @@ class Backend:
         log = PRIVATE_LOG
         if self.has_permission(user, Permissions.GOVERNMENT_OFFICIAL, economy=from_account.economy):
             log = PUBLIC_LOG
-        logger.log(log, f"{user.mention} transferred {frmt(amount)} from {from_account.account_name} to {to_account.account_name}")
+        logger.log(log, f"Economy: {from_account.economy.currency_name}\n{user.mention} transferred {frmt(amount)} from {from_account.account_name} to {to_account.account_name}")
         self.session.add(Transaction(
             actor_id=user.id,
             economy_id = from_account.economy_id,
@@ -952,7 +952,7 @@ class Backend:
         if not self.has_permission(user, Permissions.MANAGE_FUNDS, account=to_account, economy=to_account.economy):
             raise BackendError("You do not have permission to print funds")
         to_account.balance += amount
-        logger.log(PUBLIC_LOG, f'{user.mention} printed {frmt(amount)} to {to_account.account_name}')
+        logger.log(PUBLIC_LOG, f'Economy: {to_account.economy.currency_name}\n{user.mention} printed {frmt(amount)} to {to_account.account_name}')
         self.session.add(Transaction(
             actor_id = user.id,
             economy_id = to_account.economy.economy_id,
@@ -970,7 +970,7 @@ class Backend:
         if from_account.balance < amount:
             raise BackendError("There are not sufficient funds in this account to perform this action")
         from_account.balance -= amount
-        logger.log(PUBLIC_LOG, f'{user.mention} removed {frmt(amount)} from {from_account.account_name}')
+        logger.log(PUBLIC_LOG, f'Economy: {from_account.economy.currency_name}\n {user.mention} removed {frmt(amount)} from {from_account.account_name}')
         self.session.add(Transaction(
             actor_id = user.id,
             action = Actions.MANAGE_FUNDS,
