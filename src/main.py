@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import sys
-import json
+from utils import load_config, syncing
 from middleman import BackendError, Account, Permissions, AccountType, TransactionType, TaxType, frmt
 from middleman import DiscordBackendInterface as Backend
 import datetime
@@ -16,7 +16,6 @@ from discord import Webhook
 
 import discord
 from discord import Colour
-from types import CoroutineType
 import api
 
 red = Colour.red
@@ -29,11 +28,11 @@ init_time = datetime.datetime.now()
 syncing = False
 use_api = False
 
-discord_id_regex = re.compile('^<@!?[0-9]*>$')  # a regex that matches a discord id
+discord_id_regex = re.compile(r'^<@!?[0-9]*>$')  # a regex that matches a discord id
 
-id_extractor = re.compile('[<@!>]*')
+id_extractor = re.compile(r'[<@!>]*')
 
-currency_regex = re.compile('^[0-9]*([.,][0-9]{1,2}0*)?$')
+currency_regex = re.compile(r'^[0-9]*([.,][0-9]{1,2}0*)?$')
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -42,6 +41,8 @@ discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(logging.DEBUG)
 backend_logger = logging.getLogger('backend')
 backend_logger.setLevel(logging.DEBUG)
+api_logger = logging.getLogger('aiohttp.server')
+api_logger.setLevel(logging.DEBUG)
 
 stream_handler = logging.StreamHandler()
 
@@ -51,6 +52,7 @@ stream_handler.setFormatter(formatter)
 
 discord_logger.addHandler(stream_handler)
 backend_logger.addHandler(stream_handler)
+api_logger.addHandler(stream_handler)
 logger.addHandler(stream_handler)
 
 
@@ -148,7 +150,6 @@ async def tick():
 @bot.event
 async def on_ready():
     await backend.tick()
-    tick.start()
     if syncing:
         sync = await bot.tree.sync(guild=test_guild)
         print(f'Synced {len(sync)} command(s)')
@@ -164,9 +165,9 @@ async def on_ready():
 
 
 @bot.tree.command(name="ping", description="ping the bot to check if it's online", guild=test_guild)
-@app_commands.describe(debug="Whether or not to display debug info")
-async def ping(interaction: discord.Interaction, debug: bool = False):
-    if not debug:
+@app_commands.describe(isalive="Give a simpler response to only check if we can talk to discord, useful if DB is really broken")
+async def ping(interaction: discord.Interaction, isalive: bool = False):
+    if isalive:
         await interaction.response.send_message(f'Pong!')
         return
 
@@ -189,7 +190,7 @@ async def ping(interaction: discord.Interaction, debug: bool = False):
     else:
         good = False
 
-    def proccess(value):
+    def process(value):
         if type(value) == bool:
             return '🟢' if value else '🔴'  # My vim setup on this laptop isn't rendering these right, but they are the unicode emoji for a green circle and a red circle respectively
         else:
@@ -198,9 +199,9 @@ async def ping(interaction: discord.Interaction, debug: bool = False):
     colour = green() if good else red()
     embed = discord.Embed(colour=colour)
     keys = '\n'.join([k for k in keys])
-    values = '\n'.join([proccess(v) for v in values])
+    values = '\n'.join([process(v) for v in values])
     embed.add_field(name='All Systems Go: ', value=keys, inline=True)
-    embed.add_field(name=proccess(good), value=values, inline=True)
+    embed.add_field(name=process(good), value=values, inline=True)
 
     # Because I want this to work even if things are really broken I'm not using a responder thingy
     await interaction.response.send_message(embed=embed)
@@ -673,24 +674,6 @@ def setup_webhook(l, webhook_url, level):
     l.addHandler(wh)
 
 
-def load_config():
-    global syncing
-    if len(sys.argv) > 3:
-        print('Usage: main.py config_path -[S]')
-        sys.exit(1)
-
-    path = 'config.json' if len(sys.argv) < 2 else sys.argv[1]
-    if len(sys.argv) == 3:
-        if sys.argv[2] != "-S":
-            print('Usage: main.py config_path -[S]')
-            sys.exit(1)
-        syncing = True
-
-    try:
-        with open(path) as file:
-            return json.load(file)
-    except:
-        return {}
 
 
 if __name__ == '__main__':

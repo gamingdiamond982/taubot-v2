@@ -4,17 +4,9 @@ from backend import Backend, BackendError, Account, Permissions, AccountType, Tr
 
 
 def loop_adder(func):
-    def excecute(*args, **kwargs):
+    def execute(*args, **kwargs):
         asyncio.get_event_loop().create_task(func(*args, **kwargs))
-    return excecute
-
-
-
-
-
-
-
-
+    return execute
 
 
 class DiscordBackendInterface(Backend):

@@ -8,7 +8,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from discord import Member  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, INT, union, or_
 from sqlalchemy import String, BigInteger, DateTime, \
     JSON  # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
 from sqlalchemy import create_engine
@@ -137,6 +137,7 @@ class Economy(Base):
 
     guilds: Mapped[List["Guild"]] = relationship(back_populates="economy")
     accounts: Mapped[List["Account"]] = relationship(back_populates="economy")
+    applications: Mapped[List["Application"]] = relationship(back_populates="economy")
         
 
 
@@ -156,6 +157,36 @@ class MCDiscordMap(Base):
     user_id: Mapped[int] = mapped_column(BigInteger(), primary_key = True)
     mc_token: Mapped[str] = mapped_column(String(22), primary_key = True)
 
+
+class Application(Base):
+    __tablename__ = 'applications'
+    application_id: Mapped[UUID] = mapped_column(primary_key=True)
+    application_name: Mapped[str] = mapped_column(String(64))
+    owner_id: Mapped[int] = mapped_column(BigInteger())
+    economy_id = mapped_column(ForeignKey("economies.economy_id"))
+    api_keys: Mapped[List["APIKey"]] = relationship(back_populates="application")
+    economy: Mapped[Economy] = relationship(back_populates="applications")
+
+
+class KeyType(Enum):
+    GRANT = 0 # To be used for user issued keys
+    MASTER = 1 # To be used for application master keys
+
+
+class APIKey(Base):
+    __tablename__ = 'api_keys'
+    key_id: Mapped[int] = mapped_column(INT(), primary_key=True, autoincrement=True) # using an int datatype to ensure that the id will not clash with any discord snowflakes (any discord id created after 2015-1-1-0:0:1.024 should not clash) https://discord.com/developers/docs/reference#snowflakes
+    application_id = mapped_column(ForeignKey("applications.application_id", ondelete='CASCADE'))
+    internal_app_id: Mapped[UUID] = mapped_column(nullable=True)
+    issuer_id: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    spending_limit: Mapped[int] = mapped_column(nullable=True)
+    spent_to_date: Mapped[int] = mapped_column(nullable=True, default=0)
+    type: Mapped[KeyType] = mapped_column(default=KeyType.GRANT)
+    enabled: Mapped[bool] = mapped_column(default=False)
+    application: Mapped[Application] = relationship(back_populates="api_keys")
+
+    def activate(self):
+        self.enabled = True
 
 class Account(Base):
     """A class used to represent an account stored in the database"""
@@ -208,6 +239,7 @@ class Transaction(Base):
     destination_account: Mapped[Account] = relationship(foreign_keys=[destination_account_id])
     target_account: Mapped[Account] = relationship(foreign_keys=[target_account_id])
 
+
     
 
     
@@ -226,7 +258,7 @@ class Permission(Base):
     __tablename__ = 'perms'
     entry_id: Mapped[UUID] = mapped_column(primary_key=True)
     account_id: Mapped[UUID] = mapped_column(ForeignKey('accounts.account_id'), nullable=True)
-    user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id, due to how discord works there are zero chances of a collision
+    user_id: Mapped[int] = mapped_column(BigInteger()) # can also be a role id or an api key id < 4194304, due to how discord works there are zero chances of a collision
     permission: Mapped[Permissions] = mapped_column()
     allowed: Mapped[bool] = mapped_column()
     economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id", ondelete="CASCADE"), nullable=True)
@@ -243,7 +275,7 @@ class Tax(Base):
     affected_type: Mapped[AccountType] = mapped_column()
     tax_type: Mapped[TaxType] = mapped_column()
     bracket_start: Mapped[int] = mapped_column()
-    bracket_end: Mapped[int] = mapped_column()
+    bracket_end: Mapped[int] = mapped_column(nullable=True)
     rate: Mapped[int] = mapped_column()
     to_account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.account_id"))
     economy_id: Mapped[UUID] = mapped_column(ForeignKey("economies.economy_id"))
@@ -353,10 +385,30 @@ class Backend:
 
 
     def get_permissions(self, user: Member, economy=None):
-        return [i[0] for i in self.session.execute(select(Permission).where(Permission.economy_id == economy.economy_id if economy is not None else None).where(Permission.user_id==user.id)).all()]
+        perms = select(Permission).where(Permission.user_id.in_([user.id] + [r.id for r in user.roles]))
+        if economy is not None:
+            perms.where(Permission.economy == economy)
+        return [i[0] for i in self.session.execute(perms).all()]
+
+    def get_authable_accounts(self, user: Member, economy=None):
+        stmt = (select(Account).distinct().join_from(Account, Permission, Account.account_id == Permission.account_id, isouter=True)
+                .where(or_(Permission.user_id.in_([user.id] + [r.id for r in user.roles]),  Account.owner_id == user.id)))
+        if economy is not None:
+            stmt = stmt.where(Account.economy_id == economy.economy_id)
+
+        return [i[0] for i in self.session.execute(stmt).all()]
 
 
-    def has_permission(self, user: Member, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
+
+
+
+
+
+    async def key_has_permission(self, key: APIKey, *args, **kwargs) -> bool:
+        actor = await self.get_member(key.issuer_id, key.application.economy.owner_guild_id)
+        return self.has_permission(StubUser(key.key_id), *args, **kwargs) and self.has_permission(actor, *args, **kwargs)
+
+    def has_permission(self, user, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
         """
         Checks if a user is allowed to do something
         """
@@ -429,6 +481,26 @@ class Backend:
     async def get_user_dms(self, user_id):
         raise NotImplementedError()
 
+    def get_application(self, app_id):
+        return self._one_or_none(select(Application).where(Application.application_id == app_id))
+
+    def get_key(self, app: Application, ref_id: UUID) -> APIKey | None:
+        return self._one_or_none(select(APIKey).where(APIKey.application == app).where(APIKey.internal_app_id == ref_id))
+
+    def get_key_by_id(self, kid: int) -> APIKey | None:
+        return self._one_or_none(select(APIKey).where(APIKey.key_id == kid))
+
+    def initialize_key(self, app: Application, ref_id: UUID, issuer_id: int) -> APIKey:
+        current_key = self.get_key(app, ref_id)
+        if current_key is not None:
+            self.session.delete(current_key)
+
+        new_key = APIKey(application = app, internal_app_id=ref_id, issuer_id=issuer_id)
+        self.session.add(new_key)
+        return new_key
+
+
+
     def get_discord_id(self, mc_token):
         mc_ds_map = self._one_or_none(select(MCDiscordMap).where(MCDiscordMap.mc_token == mc_token))
         if mc_ds_map:
@@ -485,10 +557,10 @@ class Backend:
         self.session.add(tax_bracket)
         logger.log(PUBLIC_LOG, f"Economy: {to_account.economy.currency_name}\n{user.mention} created a new tax bracket by the name {tax_name}")
 
-        
+
         
     
-        
+
         self.session.add(Transaction(
             actor_id=user.id, 
             action=Actions.UPDATE_TAX_BRACKETS, 
@@ -531,24 +603,22 @@ class Backend:
 
     def _perform_transaction_tax(self, amount: int, transaction_type: TransactionType, economy: Economy) -> int:
         """Performs taxation and returns the total amount of tax taken"""
-        if transaction_type == TransactionType.PURCHASE:
-            vat_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.VAT).where(Tax.economy_id==economy.economy_id).order_by(Tax.bracket_start.desc())).all()
-            total_cum_tax = 0
-            for vat_tax in vat_taxes:
-                vat_tax = vat_tax[0]
-                
-                accumulated_tax = 0
+        vat_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.VAT).where(Tax.economy_id==economy.economy_id).order_by(Tax.bracket_start.desc())).all()
+        total_cum_tax = 0
+        for vat_tax in vat_taxes:
+            vat_tax = vat_tax[0]
 
-                full_tax = ((vat_tax.bracket_end - vat_tax.bracket_start)*vat_tax.rate)//100
-                if amount >= vat_tax.bracket_end:
-                    accumulated_tax += full_tax
-                else:
-                    accumulated_tax += ((amount - vat_tax.bracket_start)*vat_tax.rate)//100
-                amount -= accumulated_tax
-                vat_tax.to_account.balance += accumulated_tax
-                total_cum_tax += accumulated_tax
-            return total_cum_tax
-        return 0
+            accumulated_tax = 0
+
+            full_tax = ((vat_tax.bracket_end - vat_tax.bracket_start)*vat_tax.rate)//100
+            if amount >= vat_tax.bracket_end:
+                accumulated_tax += full_tax
+            else:
+                accumulated_tax += ((amount - vat_tax.bracket_start)*vat_tax.rate)//100
+            amount -= accumulated_tax
+            vat_tax.to_account.balance += accumulated_tax
+            total_cum_tax += accumulated_tax
+        return total_cum_tax
 
 
     def perform_tax(self, user:Member, economy: Economy):
@@ -701,6 +771,7 @@ class Backend:
             economy_id=economy.economy_id if economy is not None else None,
             target_account_id = account.account_id if account is not None else None,
             meta = make_serializable({
+                "affected_id": affected_id,
                 "permissions": [permission],
                 "allowed": allowed
             })
@@ -719,6 +790,7 @@ class Backend:
             economy_id =  economy.economy_id if economy is not None else None,
             target_account_id = account.account_id if account is not None else None,
             meta = make_serializable({
+                "affected_id": affected_id,
                 "permissions": permissions,
                 "allowed": allowed
             })
@@ -904,6 +976,7 @@ class Backend:
     def subscribe(self, user, account):
         if not self.has_permission(user, Permissions.VIEW_BALANCE, account=account):
             raise BackendError("You do not have permissions to subscribe to transaction_notifs for this account")
+        self.unsubscribe(user, account)
         self.session.add(BalanceUpdateNotifier(notifier_id = uuid4(), owner_id = user.id, account_id = account.account_id))
         self.session.commit()
 

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <link rel="stylesheet" href="{{ static_uri }}/styles.css">
+        <script src="{{ static_uri }}/index.js"></script>
+    </head>
+    <body>
+        <div id="header">
+            <h1>Authorizing {{ app.application_name }} on behalf of {{ issuer.name }}</h1>
+        </div>
+        <div id="accounts">
+            <div id="accounts-header">
+                <h2>Your Accounts: </h2>
+            </div>
+            <div id="accounts-list">
+            {% for account in accounts %}
+                <div class="account-object" id="{{ account.account_id }}">
+                    <h3>{{ account.account_name }}</h3> <br/>
+                    <b>Account Type: </b>{{ account.account_type.name }} <br/>
+                    <b>Owner ID: </b> {{ account.owner_id }} <br/>
+                    {% if has_perm(1, account) %}
+                    <label for="VIEW_BALANCE">VIEW BALANCE</label> <input type="checkbox" id="VIEW_BALANCE"><br/>
+                    {% endif %}
+                    {% if has_perm(3, account) %}
+                    <label for="TRANSFER_FUNDS">TRANSFER FUNDS</label> <input type="checkbox" id="TRANSFER_FUNDS"><br/>
+                    {% endif %}
+                </div><br/>
+            {% endfor %}
+            </div>
+            <label for="spending_limit">Spending Limit: </label> <input type="number" id="spending_limit" value="0"> <br/>
+            <button onclick="submit()">Submit</button>
+
+        </div>
+    </body>
+</html>
