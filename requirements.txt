@@ -5,3 +5,5 @@ pyjwt~=2.10.1
 cryptography
 aiohttp~=3.11.13
 discord.py~=2.5.0
+discord-oauth2.py
+jinja2
