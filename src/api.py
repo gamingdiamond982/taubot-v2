@@ -451,6 +451,7 @@ async def create_transaction(request, key: APIKey=None):
         if key.spent_to_date + amount > key.spending_limit:
             raise web.HTTPUnauthorized()
         if await backend.key_has_permission(key, Permissions.TRANSFER_FUNDS, account=from_account):
+            key.spent_to_date += amount
             backend.perform_transaction(actor, from_account, to_account, amount)
     except BackendError:
         raise web.HTTPBadRequest()

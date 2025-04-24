@@ -8,7 +8,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from discord import Member  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
-from sqlalchemy import ForeignKey, INT, union, or_
+from sqlalchemy import ForeignKey, INT, union, or_, Delete
 from sqlalchemy import String, BigInteger, DateTime, \
     JSON  # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
 from sqlalchemy import create_engine
@@ -97,6 +97,7 @@ class TaxType(Enum):
     WEALTH = 0
     INCOME = 1
     VAT = 2
+    TRANSACTION = 3
 
 class TransactionType(Enum):
     """An Enum used to represent different types of transactions"""
@@ -601,9 +602,12 @@ class Backend:
 
 
 
-    def _perform_transaction_tax(self, amount: int, transaction_type: TransactionType, economy: Economy) -> int:
+    def _perform_transaction_tax(self, amount: int, transaction: Transaction, economy: Economy) -> int:
         """Performs taxation and returns the total amount of tax taken"""
-        vat_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.VAT).where(Tax.economy_id==economy.economy_id).order_by(Tax.bracket_start.desc())).all()
+        vat_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.VAT)
+                                         .where(Tax.economy_id==economy.economy_id)
+                                         .where(Tax.affected_type == transaction.target_account.account_type)
+                                         .order_by(Tax.bracket_start.desc())).all()
         total_cum_tax = 0
         for vat_tax in vat_taxes:
             vat_tax = vat_tax[0]
@@ -997,25 +1001,28 @@ class Backend:
         if from_account.balance < amount:
             raise BackendError("You do not have sufficient funds to transfer from that account")
 
+        transaction = Transaction(
+            actor_id=user.id,
+            economy_id=from_account.economy_id,
+            target_account_id=from_account.account_id,
+            destination_account_id=to_account.account_id,
+            action=Actions.TRANSFER,
+            cud=CUD.UPDATE,
+            amount=amount
+        )
+
         if transaction_type == TransactionType.INCOME:
             to_account.income_to_date += amount
         from_account.balance -= amount
-        amount -= self._perform_transaction_tax(amount, transaction_type, from_account.economy)
+        amount -= self._perform_transaction_tax(amount, transaction, from_account.economy)
         to_account.balance += amount
+
 
         log = PRIVATE_LOG
         if self.has_permission(user, Permissions.GOVERNMENT_OFFICIAL, economy=from_account.economy):
             log = PUBLIC_LOG
         logger.log(log, f"Economy: {from_account.economy.currency_name}\n{user.mention} transferred {frmt(amount)} from {from_account.account_name} to {to_account.account_name}")
-        self.session.add(Transaction(
-            actor_id=user.id,
-            economy_id = from_account.economy_id,
-            target_account_id = from_account.account_id,
-            destination_account_id = to_account.account_id,
-            action = Actions.TRANSFER,
-            cud = CUD.UPDATE,
-            amount = amount
-        ))
+        self.session.add(transaction)
 
         self.notify_users(to_account.get_update_notifiers(), f"{user.mention} transferred {frmt(amount)} from {from_account.account_name} to {to_account.account_name}, \n it\'s new balance is {to_account.get_balance()}", "Balance Update")
         self.notify_users(from_account.get_update_notifiers(), f'{user.mention} transferred {frmt(amount)} from an account you watch ({from_account.account_name}), to {to_account.account_name} \n {from_account.account_name}\'s new balance is {from_account.get_balance()}', "Balance Update")
@@ -1054,3 +1061,9 @@ class Backend:
         ))
         self.notify_users(from_account.get_update_notifiers(), f'{user.mention} removed {frmt(amount)} from {from_account.account_name},\n it\'s new balance is {from_account.get_balance()}', "Balance Update")
         self.session.commit()
+
+    def delete_key(self, key):
+        self.session.execute(Delete(Permission).where(Permission.user_id == key.key_id))
+        self.session.delete(key)
+        self.session.commit()
+
