@@ -1001,6 +1001,9 @@ class Backend:
         if from_account.balance < amount:
             raise BackendError("You do not have sufficient funds to transfer from that account")
 
+        if from_account.account_id == to_account.account_id:
+            return 
+
         transaction = Transaction(
             actor_id=user.id,
             economy_id=from_account.economy_id,
