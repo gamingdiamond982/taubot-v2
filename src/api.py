@@ -227,9 +227,6 @@ async def get_access_token(code: str) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.post(CALLBACK_URL, data=data, auth=auth, headers=headers) as resp:
             if resp.status != 200:
-                
-                
-                
                 raise web.HTTPBadRequest()
             data = await resp.json()
     
@@ -241,7 +238,7 @@ async def get_user_id(token: str) -> int:
         async with session.get(API_URL + '/users/@me', headers={'Authorization': 'Bearer ' + token}) as resp:
             if resp.status != 200:
                 raise web.HTTPBadRequest()
-            user_id = (await resp.json()).get('id')
+            user_id = int((await resp.json()).get('id'))
     return user_id
 
 
