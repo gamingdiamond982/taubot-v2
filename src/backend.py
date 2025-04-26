@@ -606,7 +606,7 @@ class Backend:
         """Performs taxation and returns the total amount of tax taken"""
         vat_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.VAT)
                                          .where(Tax.economy_id==economy.economy_id)
-                                         .where(Tax.affected_type == transaction.target_account.account_type)
+                                         .where(Tax.affected_type == self.get_account_by_id(transaction.target_account_id).account_type)
                                          .order_by(Tax.bracket_start.desc())).all()
         total_cum_tax = 0
         for vat_tax in vat_taxes:
