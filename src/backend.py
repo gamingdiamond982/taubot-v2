@@ -407,6 +407,8 @@ class Backend:
 
     async def key_has_permission(self, key: APIKey, *args, **kwargs) -> bool:
         actor = await self.get_member(key.issuer_id, key.application.economy.owner_guild_id)
+        if actor is None:
+            actor = StubUser(key.issuer_id)
         return self.has_permission(StubUser(key.key_id), *args, **kwargs) and self.has_permission(actor, *args, **kwargs)
 
     def has_permission(self, user, permission: Permissions, account: Account = None, economy: Economy = None) -> bool:
