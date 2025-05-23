@@ -925,7 +925,7 @@ class Backend:
             raise BackendError("You do not have permission to close this account")
         acc_id = account.account_id
         econ_id = account.economy.economy_id
-        self.session.delete(account)
+        account.deleted = True
         self.session.add(Transaction(
             actor_id = authorisor.id,
             economy_id = econ_id,
