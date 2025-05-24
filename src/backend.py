@@ -1,3 +1,4 @@
+import discord
 import logging
 import time
 from datetime import datetime
