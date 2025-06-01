@@ -46,6 +46,6 @@ def generate_transaction_csv(transactions: list, filename=None, *, currency='t',
         byte = io.BytesIO(buffer.getvalue().encode("utf-8"))
     
     if as_discord_file:
-        return discord.File(byte, filename=filename);
+        return discord.File(byte, filename=filename)
     else:
         return byte
