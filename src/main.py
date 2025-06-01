@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import sys
-from utils import load_config, syncing
+from utils import load_config, syncing, generate_transaction_csv
 from middleman import BackendError, Account, Permissions, AccountType, TransactionType, TaxType, frmt
 from middleman import DiscordBackendInterface as Backend
 import datetime
@@ -83,7 +83,8 @@ login_map: dict[int, Account] = {}
 tick_time = datetime.time(hour=0,
                           minute=0)  # tick at midnight UTC, might update this to twice a day if I feel like it or even once an hour, we'll see how I feel
 
-backend = None  # Stop any fucky undefined errors
+backend: Backend = None  # pyright: ignore
+# Stop any fucky undefined errors
 
 
 def get_account(member):
@@ -616,28 +617,34 @@ async def toggle_ephemeral(interaction: discord.Interaction):
 
 @bot.tree.command(name='view_transaction_log', guild=test_guild)
 @app_commands.describe(
-    account="The account you want to view the transaction logs of, leave empty to default to the account your currently logged in as.")
-@app_commands.describe(
-    limit="The number of transactions back you wish too see, note: will not show transactions before this feature was added")
-async def view_transaction_log(interaction: discord.Interaction, account: str | None, limit: int = 10):
+    account="The account you want to view the transaction logs of, leave empty to default to the account your currently logged in as.",
+    limit="The number of transactions back you wish too see (note: will not show transactions before this feature was added).",
+    as_csv="Whether you wish to view the transaction log as a CSV file.")
+async def view_transaction_log(interaction: discord.Interaction, account: str | None, limit: int = 10, as_csv: bool = False):
     economy = backend.get_guild_economy(interaction.guild.id)
     responder = backend.get_responder(interaction)
 
     if economy is None:
-        await responder(message="This guild is not registered to an economy", colour=red())
+        return await responder(message="This guild is not registered to an economy", colour=red())
+
     account = get_account_from_name(account, economy)
     account = account if account is not None else get_account(interaction.user)
     try:
         transactions = backend.get_transaction_log(interaction.user, account, limit=limit)
     except BackendError as e:
         return await responder(message=f"{e}")
-    entries = '\n'.join([
-                            f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}t-> {t.destination_account.get_name()}'
-                            for t in transactions])
-    if len(transactions) == 0:
-        entries = 'No transactions have been logged yet'
-    await responder(message=entries)
 
+    if len(transactions) == 0:
+        await responder(message='No transactions have been logged yet')
+    else:
+        if as_csv:
+            file = generate_transaction_csv(transactions, currency=economy.currency_unit)
+            await interaction.response.send_message(content=f'Logged latest `{len(transactions)}` transaction(s).', file=file)
+        else:
+            entries = '\n'.join([
+                                f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}{economy.currency_unit}-> {t.destination_account.get_name()}'
+                                for t in transactions])
+            await responder(message=entries)
 
 @bot.tree.command(name="subscribe", guild=test_guild)
 @app_commands.describe(account="The account you want to get balance update notifications for")
