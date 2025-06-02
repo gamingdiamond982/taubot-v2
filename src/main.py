@@ -639,7 +639,7 @@ async def view_transaction_log(interaction: discord.Interaction, account: str | 
     else:
         if as_csv:
             file = generate_transaction_csv(transactions, currency=economy.currency_unit)
-            await interaction.response.send_message(content=f'Logged latest `{len(transactions)}` transaction(s).', file=file)
+            await responder(message=f'Logged latest `{len(transactions)}` transaction(s).', as_embed=False, file=file)
         else:
             entries = '\n'.join([
                                 f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}{economy.currency_unit}-> {t.destination_account.get_name()}'
