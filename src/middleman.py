@@ -3,7 +3,7 @@ import asyncio
 import typing
 from backend import Backend, Permissions, BackendError, Account, AccountType, TransactionType, TaxType, frmt
 
-def loop_adder(func: typing.Callable[..., asyncio._CoroutineLike]):
+def loop_adder(func: typing.Callable[..., typing.Coroutine]):
     """
     Decorator that schedules an async function to run in the event loop as a task.
     :param func: The coroutine to be scheduled.
@@ -46,7 +46,6 @@ class DiscordBackendInterface(Backend):
             await interaction.response.send_message(content=message if message and not as_embed else None, embed=embed, ephemeral=ephemeral, **kwargs)
         return responder
 
-
     def get_account_from_interaction(self, interaction: discord.Interaction):
         """
         Returns the interaction user's account in the interaction guild's economy.
@@ -75,7 +74,6 @@ class DiscordBackendInterface(Backend):
 
         guild = await self.bot.fetch_guild(guild_id)
         return await guild.fetch_member(user_id) if guild is not None else None
-
 
     async def get_user_dms(self, user_id: int):
         """
