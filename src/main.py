@@ -174,7 +174,7 @@ async def ping(interaction: discord.Interaction, isalive: bool = False):
 
     now = datetime.datetime.now(datetime.timezone.utc)
     keys = ["Connected to Discord: ", "Backend Exists: ", "Connected to Database: ", "Ping: ", "Uptime: "]
-    values = [True, backend is not None, backend is not None, str((now - interaction.created_at).microseconds) + 'ms',
+    values = [True, backend is not None, backend is not None, str(round((now - interaction.created_at).microseconds / 1000)) + 'ms',
               str(datetime.datetime.now() - init_time)]
     good = True
     if backend is not None:
