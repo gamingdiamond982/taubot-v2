@@ -918,6 +918,43 @@ class Backend:
         self.session.commit()
         return account
 
+    def transfer_ownership(self, authorisor: Member, account: Account, new_owner_id: int):
+        '''
+        Transfers the ownership of an account from one user to another.
+        :param authorisor: The initiator of this action.
+        :param account: The account whose ownership will be changed.
+        :param new_owner_id: The new owner's user ID.
+        :returns: The account with the new owner.
+        '''
+
+        # I'm gonna treat transferring accounts like closing them because technically the user is
+        # closing that account and giving it to somebody else
+        if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account, economy=account.economy):
+            raise BackendError("You do not have permission to transfer the ownership of this account")
+
+        old_owner_id = account.owner_id
+        economy = account.economy
+        try:
+            account.owner_id = new_owner_id
+
+            self.session.add(Transaction(
+                actor_id = authorisor.id,
+                economy_id = economy.economy_id if economy is not None else None,
+                action = Actions.UPDATE_ACCOUNTS,
+                cud = CUD.UPDATE,
+                meta = make_serializable({
+                    "old_account_owner": old_owner_id,
+                    "new_account_owner": new_owner_id
+                })
+            ))
+
+            self.session.commit()
+        except Exception as e:
+            self.session.rollback()
+            raise BackendError(f"Could not transfer account {account.account_id}'s ownership from {old_owner_id} to {new_owner_id}: {e}")
+        else:
+            return account
+
     def delete_account(self, authorisor: Member, account):
         if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account, economy=account.economy):
             raise BackendError("You do not have permission to close this account")
