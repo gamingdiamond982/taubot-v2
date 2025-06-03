@@ -1,0 +1,3 @@
+sphinx-build
+sphinx-autobuild
+insegel
