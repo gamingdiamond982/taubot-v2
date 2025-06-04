@@ -7,7 +7,7 @@ from typing import List
 from typing import Optional
 from uuid import UUID, uuid4
 
-from discord import Member  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
+from discord import Member, User  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
 from sqlalchemy import ForeignKey, INT, union, or_, Delete
 from sqlalchemy import String, BigInteger, DateTime, \
     JSON  # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
@@ -918,7 +918,7 @@ class Backend:
         self.session.commit()
         return account
 
-    def transfer_ownership(self, authorisor: Member, account: Account, new_owner_id: int):
+    def transfer_ownership(self, authorisor, account: Account, new_owner_id: int):
         '''
         Transfers the ownership of an account from one user to another.
         :param authorisor: The initiator of this action.
@@ -929,7 +929,7 @@ class Backend:
 
         # I'm gonna treat transferring accounts like closing them because technically the user is
         # closing that account and giving it to somebody else
-        if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account, economy=account.economy):
+        if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account):
             raise BackendError("You do not have permission to transfer the ownership of this account")
 
         old_owner_id = account.owner_id
@@ -947,11 +947,9 @@ class Backend:
                     "new_account_owner": new_owner_id
                 })
             ))
-
-            self.session.commit()
         except Exception as e:
             self.session.rollback()
-            raise BackendError(f"Could not transfer account {account.account_id}'s ownership from {old_owner_id} to {new_owner_id}: {e}")
+            raise BackendError(f"Could not transfer account's ownership from <@!{old_owner_id}> to <@!{new_owner_id}: {e}")
         else:
             return account
 
