@@ -88,6 +88,11 @@ backend: Backend = None  # pyright: ignore
 
 
 def get_account(member):
+    """
+    :param member: A discord user
+    :return: the discord users tau account
+    """
+
     economy = backend.get_guild_economy(member.guild.id)
     if economy is None:
         return None
@@ -102,6 +107,13 @@ def get_account(member):
 
 
 def create_embed(title, message, colour=None):
+    """
+    :param title: title for the embed
+    :param message: message for embed
+    :param colour: Colour for embed
+    :return:
+    """
+
     colour = colour if colour else discord.Colour.blue()
     embed = discord.Embed(colour=colour)
     embed.add_field(name=title, value=message)
@@ -109,6 +121,12 @@ def create_embed(title, message, colour=None):
 
 
 def get_account_from_name(name, economy):
+    """
+    :param name: Discord username (typically a string)
+    :param economy: The specific economy to look at
+    :return: the specific tau account
+    """
+
     if name is None:
         return None
     name = name.strip()
@@ -125,6 +143,11 @@ class ParseException(Exception):
 
 
 def parse_amount(amount: str) -> int:
+    """
+    :param amount: the amount of tau for a specific transaction
+    :return: an integer value
+    """
+
     if not currency_regex.match(amount):
         raise ParseException(
             "Invalid currency value, please ensure you do not have more than two decimal places of precision")

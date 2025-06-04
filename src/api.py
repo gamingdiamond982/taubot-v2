@@ -403,6 +403,11 @@ async def get_account(request, key: APIKey=None):
 
 
 def encode_transaction(t: Transaction):
+    """
+    :param t: A transaction
+    :return: an encoded transaction as a dictionary
+    """
+
     return {
             "actor_id": str(t.actor_id),
             "timestamp": t.timestamp.timestamp(),
