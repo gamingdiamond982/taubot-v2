@@ -8,6 +8,7 @@ import datetime
 import logging
 import aiohttp
 import re
+import textwrap
 from enum import Enum
 
 from discord.ext import tasks, commands
@@ -55,6 +56,25 @@ backend_logger.addHandler(stream_handler)
 api_logger.addHandler(stream_handler)
 logger.addHandler(stream_handler)
 
+# putting it here for the time being until frontend is refactored
+class ConfirmationView(discord.ui.View):
+    def __init__(self):
+        super().__init__()
+        self.event = asyncio.Event()
+        self.confirmation = False
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+    async def yes(self, __interaction__, __btn__):
+        self.confirmation = True
+        self.event.set()
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+    async def no(self, __interaction__, __btn__):
+        self.event.set()
+
+    async def get_confirmation(self):
+        await self.event.wait()
+        return self.confirmation
 
 class WebhookHandler(logging.Handler):
     def __init__(self, webhook_url, *args, **kwargs):
@@ -88,11 +108,6 @@ backend: Backend = None  # pyright: ignore
 
 
 def get_account(member):
-    """
-    :param member: A discord user
-    :return: the discord users tau account
-    """
-
     economy = backend.get_guild_economy(member.guild.id)
     if economy is None:
         return None
@@ -107,13 +122,6 @@ def get_account(member):
 
 
 def create_embed(title, message, colour=None):
-    """
-    :param title: title for the embed
-    :param message: message for embed
-    :param colour: Colour for embed
-    :return:
-    """
-
     colour = colour if colour else discord.Colour.blue()
     embed = discord.Embed(colour=colour)
     embed.add_field(name=title, value=message)
@@ -121,12 +129,6 @@ def create_embed(title, message, colour=None):
 
 
 def get_account_from_name(name, economy):
-    """
-    :param name: Discord username (typically a string)
-    :param economy: The specific economy to look at
-    :return: the specific tau account
-    """
-
     if name is None:
         return None
     name = name.strip()
@@ -143,11 +145,6 @@ class ParseException(Exception):
 
 
 def parse_amount(amount: str) -> int:
-    """
-    :param amount: the amount of tau for a specific transaction
-    :return: an integer value
-    """
-
     if not currency_regex.match(amount):
         raise ParseException(
             "Invalid currency value, please ensure you do not have more than two decimal places of precision")
@@ -312,6 +309,44 @@ async def create_account(interaction: discord.Interaction):
     except BackendError as e:
         await responder(message=f'The account could not be opened: {e}', colour=red())
 
+@app_commands.describe(new_owner="The new owner of the account.", account_name="The account you wish to transfer your ownership of. Defaults to the current logged in account.")
+@bot.tree.command(name='transfer_ownership', description="Transfers your ownership of an account to another user.", guild=test_guild)
+async def transfer_ownership(interaction: discord.Interaction, new_owner: discord.Member, account_name: str | None):
+    responder = backend.get_responder(interaction)
+    economy = backend.get_guild_economy(interaction.guild.id)
+    if account_name is None:
+        account = get_account(interaction.user)
+    else:
+        account = get_account_from_name(account_name, economy)
+
+    if account is None:
+        await responder(message='Could not find that account', colour=red())
+        return
+
+    confirmation = ConfirmationView()
+    await responder(message=textwrap.dedent(f"""
+        Are you sure you want to transfer the ownership of this account to {new_owner.mention}?
+        You will not be able to:
+        - login as the account or close it
+        - view the account's balance
+        - transfer funds from the account, including creating recurring transfers
+        - receive updates about the account's balance
+        In addition, you will be logged out of the account.
+    """), view=confirmation)
+
+    confirmed = await confirmation.get_confirmation()
+    if confirmed:
+        try:
+            backend.transfer_ownership(interaction.user, account, new_owner.id)
+        except Exception as e:
+            await responder(message=e, colour=red(), edit=True, view=None)
+        else:
+            user_acc = backend.get_account_from_interaction(interaction)
+            if user_acc:
+                login_map[interaction.user.id] = user_acc
+            await responder(message=f"Transferred account ownership to {new_owner.mention}.", edit=True, view=None)
+    else:
+        await responder(message=f"Cancelled operation.", edit=True, view=None)
 
 @bot.tree.command(name='login', description="login to an account that is not your's in order to act as your behalf",
                   guild=test_guild)
