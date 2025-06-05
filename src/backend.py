@@ -930,7 +930,10 @@ class Backend:
         # I'm gonna treat transferring accounts like closing them because technically the user is
         # closing that account and giving it to somebody else
         if not self.has_permission(authorisor, Permissions.CLOSE_ACCOUNT, account=account):
-            raise BackendError("You do not have permission to transfer the ownership of this account")
+            raise BackendError("You do not have permission to transfer the ownership of this account.")
+
+        if account.account_type == AccountType.USER:
+            raise BackendError("You cannot transfer your user account.")
 
         old_owner_id = account.owner_id
         economy = account.economy
@@ -949,7 +952,7 @@ class Backend:
             ))
         except Exception as e:
             self.session.rollback()
-            raise BackendError(f"Could not transfer account's ownership from <@!{old_owner_id}> to <@!{new_owner_id}: {e}")
+            raise BackendError(f"Could not transfer account's ownership from <@!{old_owner_id}> to <@!{new_owner_id}: {e}.")
         else:
             return account
 
