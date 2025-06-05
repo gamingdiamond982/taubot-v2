@@ -950,9 +950,11 @@ class Backend:
                     "new_account_owner": new_owner_id
                 })
             ))
+
+            self.session.commit()
         except Exception as e:
             self.session.rollback()
-            raise BackendError(f"Could not transfer account's ownership from <@!{old_owner_id}> to <@!{new_owner_id}: {e}.")
+            raise BackendError(f"Failed to transfer ownership: {e}.")
         else:
             return account
 
