@@ -2,6 +2,7 @@ Usage
 =====
 
 .. _prerequisites:
+
 Prerequisites
 -------------
 
@@ -12,6 +13,7 @@ For deployment of a production server it's recommended you install postgres, but
 Sqlite is recommended for local development environments as it's setup and overhead are significantly less invasive
 
 .. _installation:
+
 Installation
 ------------
 

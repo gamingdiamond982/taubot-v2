@@ -15,6 +15,8 @@ Contents
 --------
 
 .. toctree::
-    usage
+   usage
+   internal
+   api
 
 

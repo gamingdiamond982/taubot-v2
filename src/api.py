@@ -31,18 +31,15 @@ CALLBACK_URL = API_URL + "/oauth2/token"
 
 
 trusted_public_keys = {}
+private_key = None
 routes = web.RouteTableDef()
 INSECURE = (
     re.compile('^/api/oauth/'),
 )
 backend: Backend = None
 
-trusted_pubk_fps = os.listdir('./keys/public-keys/')
-private_key = open('./keys/jwt-key', 'rb').read()
 
 
-for fp in trusted_pubk_fps:
-    trusted_public_keys[fp] = open('./keys/public-keys/' + fp, 'rb').read()
 
 class APIStubUser(StubUser):
     @classmethod
@@ -461,7 +458,12 @@ async def create_transaction(request, key: APIKey=None):
 
 
 def init_app():
-    global config
+    global config, trusted_public_keys, private_key
+
+    trusted_pubk_fps = os.listdir('./keys/public-keys/')
+    private_key = open('./keys/jwt-key', 'rb').read()
+    for fp in trusted_pubk_fps:
+        trusted_public_keys[fp] = open('./keys/public-keys/' + fp, 'rb').read()
     config = load_config()
     env.globals['static_uri'] = config.get('static_uri')
     app = web.Application(middlewares=[authenticate])
