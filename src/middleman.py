@@ -35,18 +35,31 @@ class DiscordBackendInterface(Backend):
         
         assert interaction.command
         title = interaction.command.name
-        async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url, *, edit=False, as_embed=True, **kwargs):
+
+        async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url, *, edit=False, as_embed=True, wait: bool = False, **kwargs) -> discord.InteractionMessage | None:
             colour = colour if colour is not None else discord.Colour.yellow()
+            params: dict[str, typing.Any] = {
+                "content": message if message and not as_embed else None
+            }
+
             embed = discord.Embed(colour=colour) if embed is None and as_embed else embed
             if embed:
                 embed.set_thumbnail(url=thumbnail)
                 embed.add_field(name=title, value=message) if message is not None else None
                 embed.set_footer(text="This message was sent by a bot and is probably highly important")
+                params["embed"] = embed
+
             ephemeral = self.has_permission(interaction.user, Permissions.USES_EPHEMERAL)
+            params.update(**kwargs)
+
             if edit:
-                await interaction.edit_original_response(content=message if message and not as_embed else None, embed=embed, **kwargs)
+                await interaction.edit_original_response(**params)
             else:
-                await interaction.response.send_message(content=message if message and not as_embed else None, embed=embed, ephemeral=ephemeral, **kwargs)
+                params["ephemeral"] = ephemeral
+                await interaction.response.send_message(**params)
+            
+            if wait:
+                return (await interaction.original_response())
         return responder
 
     def get_account_from_interaction(self, interaction: discord.Interaction):
