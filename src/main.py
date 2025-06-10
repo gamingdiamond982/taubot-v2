@@ -76,6 +76,89 @@ class ConfirmationView(discord.ui.View):
         await self.event.wait()
         return self.confirmation
 
+# I wanted to use a TypeVar here when it was still a normal list segmenter implementation
+# but since now it is segmenting by string length I don't think theres leeway for things other than strings 
+class PaginatorView(discord.ui.View):
+    message: discord.Message
+
+    @classmethod
+    def segment_by_length(cls, items: list[str], max_length: int = 1024, sep: str = "\n") -> list[list[str]]:
+        '''
+        A static method to segment a list of strings into chunks that do not exceed the maximum length.
+        :param items: The list of strings.
+        :param max_length: The maximum sum of characters a chunk can have.
+        :param sep: The separator used in joining the items together into a string.
+        :returns: A list of chunks of strings.
+        '''
+
+        chunks = []
+        current_chunk = []
+        current_length = 0 
+
+        for item in items:
+            item_length = len(item) + len(sep) if current_chunk else len(item)
+            if current_length + item_length > max_length:
+                chunks.append(current_chunk)
+                current_chunk = [item]
+                current_length = len(item)
+            else:
+                current_chunk.append(item)
+                current_length += item_length
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
+ 
+    def __init__(self, embeds: list[discord.Embed]):
+        super().__init__()
+        self.embeds = embeds
+        self.index = 0
+        self.counter.label = f"{self.index + 1}/{len(self.embeds)}"
+
+    def _update_button_states(self):
+        last_index = len(self.embeds) - 1
+        is_first = self.index <= 0
+        is_last = self.index >= last_index
+
+        self.first_btn.disabled = is_first
+        self.previous_btn.disabled = is_first
+        self.next_btn.disabled = is_last
+        self.last_btn.disabled = is_last
+
+    async def update_item(self, new_index: int):
+        self.index = max(0, min(new_index, len(self.embeds) - 1))
+        self._update_button_states()
+        self.counter.label = f"{self.index + 1}/{len(self.embeds)}"
+        
+        if self.message:
+            self.message = await self.message.edit(embed=self.embeds[self.index], view=self)
+
+    @discord.ui.button(emoji="⏪", style=discord.ButtonStyle.red) # reverse emoji
+    async def first_btn(self, interaction: discord.Interaction, _):
+        await interaction.response.defer() # not deferring in buttons causes the interaction to fail for some reason
+        await self.update_item(0)
+
+    @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.green) # left arrow emoji
+    async def previous_btn(self, interaction: discord.Interaction, _):
+        await interaction.response.defer()
+        await self.update_item(self.index - 1)
+
+    @discord.ui.button(label="?/?", style=discord.ButtonStyle.grey, disabled=True)
+    async def counter(self, __interaction__: discord.Interaction, _):
+        pass
+
+    @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.green) # right arrow emoji
+    async def next_btn(self, interaction: discord.Interaction, _):
+        await interaction.response.defer()
+        await self.update_item(self.index + 1)
+
+    @discord.ui.button(emoji="⏩", style=discord.ButtonStyle.red) # ff emoji
+    async def last_btn(self, interaction: discord.Interaction, _):
+        await interaction.response.defer()
+        await self.update_item(len(self.embeds) - 1)
+
+
 class WebhookHandler(logging.Handler):
     def __init__(self, webhook_url, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -91,12 +174,11 @@ class WebhookHandler(logging.Handler):
         embed.add_field(name=record.name, value=record.message, inline=False)
         asyncio.get_event_loop().create_task(self.send(embed=embed))
 
-
-# discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
-test_guild = None # discord.Object(id=1236137485554155612)  # Change to None for deployment
+test_guild = None
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 login_map: dict[int, Account] = {}
 
@@ -105,7 +187,6 @@ tick_time = datetime.time(hour=0,
 
 backend: Backend = None  # pyright: ignore
 # Stop any fucky undefined errors
-
 
 def get_account(member):
     """
@@ -125,20 +206,20 @@ def get_account(member):
         acc = backend.get_user_account(member.id, economy)
     return acc
 
-
-def create_embed(title, message, colour=None):
+def create_embed(title, message, colour=None, *, with_footer: bool = False):
     """
     :param title: title for the embed
     :param message: message for embed
     :param colour: Colour for embed
+    :param with_footer: Whether to include the default bot footer.
     :return:
     """
 
     colour = colour if colour else discord.Colour.blue()
-    embed = discord.Embed(colour=colour)
-    embed.add_field(name=title, value=message)
+    embed = discord.Embed(colour=colour).add_field(name=title, value=message)
+    if with_footer:
+        embed.set_footer(text="This message was sent by a bot and is probably highly important")
     return embed
-
 
 def get_account_from_name(name, economy):
     """
@@ -195,6 +276,8 @@ async def tick():
 async def on_ready():
     await backend.tick()
     if syncing:
+        if test_guild:
+            bot.tree.copy_global_to(guild=test_guild)
         sync = await bot.tree.sync(guild=test_guild)
         print(f'Synced {len(sync)} command(s)')
     if use_api:
@@ -207,8 +290,21 @@ async def on_ready():
         print("Successfully started the api")
     print("Successfully started bot")
 
+# a global error handler
+@bot.tree.error
+async def on_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    try:
+        responder = backend.get_responder(interaction)
+        await responder(message=f"An error occured:\n```{error}```", colour=red())
+        discord_logger.error("An error occured: %s", error, exc_info=error)
+    except:
+        embed = discord.Embed(
+            colour=red(),
+            description=f"An error occured:\n```{error}```"
+        )
+        await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="ping", description="ping the bot to check if it's online", guild=test_guild)
+@bot.tree.command(name="ping", description="ping the bot to check if it's online")
 @app_commands.describe(isalive="Give a simpler response to only check if we can talk to discord, useful if DB is really broken")
 async def ping(interaction: discord.Interaction, isalive: bool = False):
     if isalive:
@@ -251,7 +347,7 @@ async def ping(interaction: discord.Interaction, isalive: bool = False):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="create_economy", description="Creates a new economy", guild=test_guild)
+@bot.tree.command(name="create_economy", description="Creates a new economy")
 @app_commands.describe(economy_name="The name of the economy")
 @app_commands.describe(currency_unit="The unit of currency to be used in the economy")
 async def create_economy(interaction: discord.Interaction, economy_name: str, currency_unit: str):
@@ -291,7 +387,7 @@ async def join_economy(interaction: discord.Interaction, economy_name: str):
     await responder(message=f'Successfully joined economy: {economy_name}')
 
 
-@bot.tree.command(name='delete_economy', description="Deletes an economy", guild=test_guild)
+@bot.tree.command(name='delete_economy', description="Deletes an economy")
 @app_commands.describe(economy_name='The name of the economy')
 async def delete_economy(interaction: discord.Interaction, economy_name: str):
     responder = backend.get_responder(interaction)
@@ -307,7 +403,7 @@ async def delete_economy(interaction: discord.Interaction, economy_name: str):
         await responder(message=f"The economy could not be deleted: {e}", colour=red())
 
 
-@bot.tree.command(name="link", description="Links your mc account with taubot", guild=test_guild)
+@bot.tree.command(name="link", description="Links your mc account with taubot")
 @app_commands.describe(token="The token generated by running /link on the mc server")
 async def link_account(interaction: discord.Interaction, token: str):
     responder = backend.get_responder(interaction)
@@ -318,7 +414,7 @@ async def link_account(interaction: discord.Interaction, token: str):
         await responder(message=f"Could not link your account due to : {e}", colour=red())
 
 
-@bot.tree.command(name='open_account', description="opens a user account in this guild's economy", guild=test_guild)
+@bot.tree.command(name='open_account', description="opens a user account in this guild's economy")
 async def create_account(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
@@ -333,7 +429,7 @@ async def create_account(interaction: discord.Interaction):
         await responder(message=f'The account could not be opened: {e}', colour=red())
 
 @app_commands.describe(new_owner="The new owner of the account.", account_name="The account you wish to transfer your ownership of. Defaults to the current logged in account.")
-@bot.tree.command(name='transfer_ownership', description="Transfers your ownership of an account to another user.", guild=test_guild)
+@bot.tree.command(name='transfer_ownership', description="Transfers your ownership of an account to another user.")
 async def transfer_ownership(interaction: discord.Interaction, new_owner: discord.Member, account_name: str | None):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
@@ -394,7 +490,7 @@ async def login(interaction: discord.Interaction, account_name: str | None):
         message=f'You have now logged in as {account.account_name}\n To log back into your user account simply run `/login` without any arguments')
 
 
-@bot.tree.command(name='whoami', description="tells you who you are logged in as", guild=test_guild)
+@bot.tree.command(name='whoami', description="tells you who you are logged in as")
 async def whoami(interaction: discord.Interaction):
     me = get_account(interaction.user)
     responder = backend.get_responder(interaction)
@@ -405,7 +501,7 @@ async def whoami(interaction: discord.Interaction):
     await responder(message=f"You are acting as {me.account_name}")
 
 
-@bot.tree.command(name='open_special_account', guild=test_guild)
+@bot.tree.command(name='open_special_account')
 @app_commands.describe(owner="The owner of the new account")
 @app_commands.describe(account_name="The name of the account to open")
 @app_commands.describe(account_type="The type of account to open")
@@ -426,7 +522,7 @@ async def open_special_account(interaction: discord.Interaction, owner: discord.
         await responder(message=f"Could not open account due to : {e}", colour=red())
 
 
-@bot.tree.command(name="close_account", guild=test_guild)
+@bot.tree.command(name="close_account")
 @app_commands.describe(account_name="The name of the account you want to close")
 async def close_account(interaction: discord.Interaction, account_name: str | None):
     responder = backend.get_responder(interaction)
@@ -447,7 +543,7 @@ async def close_account(interaction: discord.Interaction, account_name: str | No
         await responder(message=f"Could not close account due to {e}", colour=red())
 
 
-@bot.tree.command(name='balance', guild=test_guild)
+@bot.tree.command(name='balance')
 async def get_balance(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
@@ -466,7 +562,7 @@ async def get_balance(interaction: discord.Interaction):
         await responder(message=f'You do not have permission to view the balance of {account.account_name}')
 
 
-@bot.tree.command(name='transfer', guild=test_guild)
+@bot.tree.command(name='transfer')
 @app_commands.describe(amount="The amount to transfer")
 @app_commands.describe(to_account="The account to transfer the funds too")
 @app_commands.describe(transaction_type="The type of transfer that is being performed")
@@ -494,7 +590,7 @@ async def transfer_funds(interaction: discord.Interaction, amount: str, to_accou
         await responder(message=f'Failed to perform transaction due to : {e}', colour=red())
 
 
-@bot.tree.command(name="create_recurring_transfer", guild=test_guild)
+@bot.tree.command(name="create_recurring_transfer")
 @app_commands.describe(amount="The amount to transfer every interval")
 @app_commands.describe(to_account="The account you want to transfer too")
 @app_commands.describe(payment_interval="How often you want to perform the transaction in days")
@@ -532,7 +628,7 @@ async def create_recurring_transfer(interaction: discord.Interaction, amount: st
         await responder(message=f"Failed to create a recurring transfer due to: {e}", colour=red())
 
 
-@bot.tree.command(name='view_permissions', guild=test_guild)
+@bot.tree.command(name='view_permissions')
 @app_commands.describe(user='The user you want to view the permissions of')
 async def view_permissions(interaction: discord.Interaction, user: discord.Member | discord.Role):
     responder = backend.get_responder(interaction)
@@ -554,7 +650,7 @@ class PermissionState(Enum):
     DEFAULT = 2
 
 
-@bot.tree.command(name="update_permission", guild=test_guild)
+@bot.tree.command(name="update_permission")
 @app_commands.describe(affects="What you want to update the permissions for be it a user or role")
 @app_commands.describe(permission="The permission to update")
 @app_commands.describe(account="The account the permission should apply too")
@@ -582,7 +678,7 @@ async def update_permissions(interaction: discord.Interaction, affects: discord.
         await responder(f'could not update permissions due to : {e}', colour=red())
 
 
-@bot.tree.command(name="print_money", guild=test_guild)
+@bot.tree.command(name="print_money")
 @app_commands.describe(to_account="The account you want to give money too")
 @app_commands.describe(amount="The amount you want to print")
 async def print_money(interaction: discord.Interaction, to_account: str, amount: str):
@@ -605,7 +701,7 @@ async def print_money(interaction: discord.Interaction, to_account: str, amount:
         await responder(f'Failed to print money due to : {e}', red())
 
 
-@bot.tree.command(name="remove_funds", guild=test_guild)
+@bot.tree.command(name="remove_funds")
 @app_commands.describe(from_account="The account you want to remove funds from")
 @app_commands.describe(amount="The amount you want to remove")
 async def remove_funds(interaction: discord.Interaction, from_account: str, amount: str):
@@ -628,7 +724,7 @@ async def remove_funds(interaction: discord.Interaction, from_account: str, amou
         await responder(message=f'Could not remove funds due to : {e}', colour=red())
 
 
-@bot.tree.command(name="create_tax_bracket", guild=test_guild)
+@bot.tree.command(name="create_tax_bracket")
 @app_commands.describe(tax_name="The name of the tax bracket you want to create")
 @app_commands.describe(affected_type="The type of account that is affected by your tax")
 @app_commands.describe(tax_type="The type of tax you wish to create")
@@ -658,7 +754,7 @@ async def create_tax_bracket(interaction: discord.Interaction, tax_name: str, af
         await responder(message=f"Could not create a tax bracket due to : {e}", colour=red())
 
 
-@bot.tree.command(name="delete_tax_bracket", guild=test_guild)
+@bot.tree.command(name="delete_tax_bracket")
 @app_commands.describe(tax_name="The name of the tax bracket you want to delete")
 async def delete_tax_bracket(interaction: discord.Interaction, tax_name: str):
     economy = backend.get_guild_economy(interaction.guild.id)
@@ -673,7 +769,7 @@ async def delete_tax_bracket(interaction: discord.Interaction, tax_name: str):
         await responder(message=f"Could not remove tax bracket due to : {e}", colour=red())
 
 
-@bot.tree.command(name="perform_tax", guild=test_guild)
+@bot.tree.command(name="perform_tax")
 async def perform_tax(interaction: discord.Interaction):
     economy = backend.get_guild_economy(interaction.guild.id)
     responder = backend.get_responder(interaction)
@@ -689,14 +785,14 @@ async def perform_tax(interaction: discord.Interaction):
             colour=red())
 
 
-@bot.tree.command(name='toggle_ephemeral', guild=test_guild)
+@bot.tree.command(name='toggle_ephemeral')
 async def toggle_ephemeral(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     backend.toggle_ephemeral(interaction.user)
     await responder("Successfully updated your prefrences")
 
 
-@bot.tree.command(name='view_transaction_log', guild=test_guild)
+@bot.tree.command(name='view_transaction_log')
 @app_commands.describe(
     account="The account you want to view the transaction logs of, leave empty to default to the account your currently logged in as.",
     limit="The number of transactions back you wish too see (note: will not show transactions before this feature was added).",
@@ -719,15 +815,33 @@ async def view_transaction_log(interaction: discord.Interaction, account: str | 
         await responder(message='No transactions have been logged yet')
     else:
         if as_csv:
-            file = generate_transaction_csv(transactions, currency=economy.currency_unit)
+            file = generate_transaction_csv(transactions, currency=economy.currency_unit, bot=bot)
             await responder(message=f'Logged latest `{len(transactions)}` transaction(s).', as_embed=False, file=file)
         else:
-            entries = '\n'.join([
-                                f'{t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} --{frmt(t.amount)}{economy.currency_unit}-> {t.destination_account.get_name()}'
-                                for t in transactions])
-            await responder(message=entries)
+            items = [f'- {t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} -- {frmt(t.amount)}{economy.currency_unit} → {t.destination_account.get_name()}'
+                    for t in transactions]
 
-@bot.tree.command(name="subscribe", guild=test_guild)
+            chunks = PaginatorView.segment_by_length(items)
+            if len(chunks) == 1:
+                entries = "\n".join(chunks[0])
+                await responder(message=entries)
+            else:
+                entries = []
+                for chunk in chunks:
+                    entries.append(
+                        create_embed(
+                            interaction.command.name if interaction.command else "transactions",
+                            "\n".join(chunk),
+                            yellow(),
+                            with_footer=True)
+                    )
+
+                view = PaginatorView(entries)
+                msg = await responder(embed=view.embeds[0], view=view, wait=True)
+                if msg:
+                    view.message = msg
+
+@bot.tree.command(name="subscribe")
 @app_commands.describe(account="The account you want to get balance update notifications for")
 async def subscribe(interaction: discord.Interaction, account: str):
     economy = backend.get_guild_economy(interaction.guild.id)
@@ -742,7 +856,7 @@ async def subscribe(interaction: discord.Interaction, account: str):
     await responder(f'Successfully subscribed to receive balance updates from {account.account_name}')
 
 
-@bot.tree.command(name="unsubscribe", guild=test_guild)
+@bot.tree.command(name="unsubscribe")
 @app_commands.describe(account="The account you want to unsubscribe from.")
 async def unsubscribe(interaction: discord.Interaction, account: str):
     economy = backend.get_guild_economy(interaction.guild.id)
@@ -755,14 +869,10 @@ async def unsubscribe(interaction: discord.Interaction, account: str):
 
     await responder(message=f"You will no longer receive balance updates from {account.account_name}.")
 
-
 def setup_webhook(l, webhook_url, level):
     wh = WebhookHandler(webhook_url)
     wh.setLevel(level)
     l.addHandler(wh)
-
-
-
 
 if __name__ == '__main__':
     config = load_config()
@@ -773,6 +883,10 @@ if __name__ == '__main__':
     if not token:
         logger.log(logging.CRITICAL, "Discord token not found in the config file")
         sys.exit(1)
+
+    # changed it so that test_guild is set from config not hardcoded
+    if (test_guild_id := config.get('test_guild_id')) is not None:
+        test_guild = discord.Object(id=test_guild_id)
 
     use_api = bool(config.get('api'))
 
