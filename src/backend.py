@@ -7,8 +7,8 @@ from typing import List
 from typing import Optional
 from uuid import UUID, uuid4
 
-from discord import Member, User  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
-from sqlalchemy import ForeignKey, INT, union, or_, Delete
+from discord import Member, User # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
+from sqlalchemy import ForeignKey, INT, or_, Delete
 from sqlalchemy import String, BigInteger, DateTime, \
     JSON  # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
 from sqlalchemy import create_engine
@@ -219,8 +219,6 @@ class Account(Base):
 
     def delete(self):
         self.deleted = True
-
-
 
 class Transaction(Base):
     """A class used to represent transactions stored in the database"""
