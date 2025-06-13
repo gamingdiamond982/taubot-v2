@@ -178,7 +178,6 @@ test_guild = None
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
 login_map: dict[int, Account] = {}
 
@@ -815,7 +814,7 @@ async def view_transaction_log(interaction: discord.Interaction, account: str | 
         await responder(message='No transactions have been logged yet')
     else:
         if as_csv:
-            file = generate_transaction_csv(transactions, currency=economy.currency_unit, bot=bot)
+            file = generate_transaction_csv(transactions, currency=economy.currency_unit)
             await responder(message=f'Logged latest `{len(transactions)}` transaction(s).', as_embed=False, file=file)
         else:
             items = [f'- {t.timestamp.strftime("%d/%m/%y %H:%M")} {t.target_account.get_name()} -- {frmt(t.amount)}{economy.currency_unit} → {t.destination_account.get_name()}'
