@@ -36,7 +36,7 @@ class DiscordBackendInterface(Backend):
         assert interaction.command
         title = interaction.command.name
 
-        async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url, *, edit=False, as_embed=True, wait: bool = False, **kwargs) -> discord.InteractionMessage | None:
+        async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url, *, edit=False, as_embed=True, wait: bool = False, **kwargs):
             colour = colour if colour is not None else discord.Colour.yellow()
             params: dict[str, typing.Any] = {
                 "content": message if message and not as_embed else None
@@ -62,6 +62,47 @@ class DiscordBackendInterface(Backend):
                 return (await interaction.original_response())
         return responder
 
+    def get_deferred_responder(self, interaction: discord.Interaction):
+        """
+        Returns the deferred responder function used to reply in response to commands.
+
+        :param interaction: The Discord interaction object, specifically a command interaction.
+        :returns: The responder function.
+
+        .. note
+        This is used in consideration of a user's ephemeral preferences and to avoid repeating boilerplate code.
+        """
+        
+        assert interaction.command
+        title = interaction.command.name
+
+        async def responder(message=None, colour=None, embed=None, thumbnail=interaction.user.display_avatar.url, *, edit=False, as_embed=True, wait: bool = False, **kwargs):
+            colour = colour if colour is not None else discord.Colour.yellow()
+            params: dict[str, typing.Any] = {
+                "content": message if message and not as_embed else None
+            }
+
+            embed = discord.Embed(colour=colour) if embed is None and as_embed else embed
+            if embed:
+                embed.set_thumbnail(url=thumbnail)
+                embed.add_field(name=title, value=message) if message is not None else None
+                embed.set_footer(text="This message was sent by a bot and is probably highly important")
+                params["embed"] = embed
+
+            ephemeral = self.has_permission(interaction.user, Permissions.USES_EPHEMERAL)
+            params.update(**kwargs)
+
+            if edit:
+                msg = await interaction.followup.edit_message(**params)
+            else:
+                params["ephemeral"] = ephemeral
+                params["wait"] = wait
+                msg = await interaction.followup.send(**params)
+            
+            if wait:
+                return msg
+        return responder
+
     def get_account_from_interaction(self, interaction: discord.Interaction):
         """
         Returns the interaction user's account in the interaction guild's economy.
@@ -78,6 +119,15 @@ class DiscordBackendInterface(Backend):
             return None
 
         return self.get_user_account(interaction.user.id, economy)
+
+    async def defer_with_ephemeral(self, interaction: discord.Interaction):
+        '''
+        Defers an interaction to ensure Discord recognizes it after 3 seconds.
+        :param interaction: The Discord interaction object.
+        '''
+
+        ephemeral = self.has_permission(interaction.user, Permissions.USES_EPHEMERAL)
+        await interaction.response.defer(ephemeral=ephemeral)
 
     async def get_member(self, user_id: int, guild_id: int):
         """
