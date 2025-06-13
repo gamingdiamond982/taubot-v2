@@ -97,6 +97,7 @@ test_guild = None # discord.Object(id=1236137485554155612)  # Change to None for
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 login_map: dict[int, Account] = {}
 
@@ -702,8 +703,9 @@ async def toggle_ephemeral(interaction: discord.Interaction):
     limit="The number of transactions back you wish too see (note: will not show transactions before this feature was added).",
     as_csv="Whether you wish to view the transaction log as a CSV file.")
 async def view_transaction_log(interaction: discord.Interaction, account: str | None, limit: int = 10, as_csv: bool = False):
+    await backend.defer_with_ephemeral(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
-    responder = backend.get_responder(interaction)
+    responder = backend.get_deferred_responder(interaction)
 
     if economy is None:
         return await responder(message="This guild is not registered to an economy", colour=red())
@@ -719,7 +721,7 @@ async def view_transaction_log(interaction: discord.Interaction, account: str | 
         await responder(message='No transactions have been logged yet')
     else:
         if as_csv:
-            file = generate_transaction_csv(transactions, currency=economy.currency_unit)
+            file = generate_transaction_csv(transactions, currency=economy.currency_unit, bot=bot)
             await responder(message=f'Logged latest `{len(transactions)}` transaction(s).', as_embed=False, file=file)
         else:
             entries = '\n'.join([
