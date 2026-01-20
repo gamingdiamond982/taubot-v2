@@ -1,7 +1,7 @@
 import discord
 import asyncio
 import typing
-from backend import Backend, Permissions, BackendError, Account, AccountType, TransactionType, TaxType, frmt
+from backend import Backend, Permissions, BackendError, Account, AccountType, TransactionType, TaxType, frmt, logger, PRIVATE_LOG
 
 def loop_adder(func: typing.Callable[..., typing.Coroutine]):
     """
@@ -101,9 +101,16 @@ class DiscordBackendInterface(Backend):
         :param thumbnail: The URL of the image used in the notification embed's thumbnail.
         """
 
+        if not user_id:
+            return
+
         embed = discord.Embed(colour=discord.Colour.yellow())
         embed.set_thumbnail(url=thumbnail)
         embed.add_field(name=title, value=message)
         embed.set_footer(text="This message was sent by a bot and is probably highly important")
         dms = await self.get_user_dms(user_id)
-        await dms.send(embed=embed)
+
+        try:
+            await dms.send(embed=embed)
+        except discord.Forbidden:
+            logger.log(PRIVATE_LOG, f"Could not send message to <@!{user_id}> in private messages")

@@ -1,5 +1,7 @@
+from io import StringIO
 import logging
 import time
+import csv
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -8,7 +10,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from discord import Member, User  # I wanted to avoid doing this here, gonna have to rewrite all the unittests.
-from sqlalchemy import ForeignKey, INT, union, or_, Delete
+from sqlalchemy import ForeignKey, INT, inspect, union, or_, Delete
 from sqlalchemy import String, BigInteger, DateTime, \
     JSON  # I wanted to avoid using the JSON type since it locks us into certain databases, but on further research it seems to be supported by most major db distributions, and having unstructured data at times is sometimes just way too useful.
 from sqlalchemy import create_engine
@@ -343,7 +345,32 @@ class Backend:
         self.engine = create_engine(path)
         self.session = Session(self.engine)
         Base.metadata.create_all(self.engine)
-            
+
+    def dump_accounts_csv(self, buf: StringIO):
+        out_csv = csv.writer(buf, lineterminator='\n')
+
+        columns = [column.name for column in inspect(Account).columns]
+        out_csv.writerow(columns)
+
+        extract_query = [getattr(Account, col) for col in columns]
+        for mov in self.session.query(*extract_query):
+            out_csv.writerow(mov)
+
+        buf.seek(0)
+        return buf
+
+    def dump_transactions_csv(self, buf: StringIO):
+        out_csv = csv.writer(buf, lineterminator='\n')
+
+        columns = [column.name for column in inspect(Transaction).columns]
+        out_csv.writerow(columns)
+
+        extract_query = [getattr(Transaction, col) for col in columns]
+        for mov in self.session.query(*extract_query):
+            out_csv.writerow(mov)
+
+        buf.seek(0)
+        return buf
 
     async def tick(self):
         """
@@ -376,7 +403,9 @@ class Backend:
             else: # for those unfamiliar with for/else this is not executed if the loop breaks
                 transfer.number_of_payments_left = payments_left
                 transfer.last_payment_timestamp = tick_time
+
         self.session.commit()
+        
         logger.log(PUBLIC_LOG, f'successfully performed tick')
 
 
@@ -398,12 +427,6 @@ class Backend:
             stmt = stmt.where(Account.economy_id == economy.economy_id)
 
         return [i[0] for i in self.session.execute(stmt).all()]
-
-
-
-
-
-
 
     async def key_has_permission(self, key: APIKey, *args, **kwargs) -> bool:
         actor = await self.get_member(key.issuer_id, key.application.economy.owner_guild_id)
@@ -629,10 +652,16 @@ class Backend:
         if not self.has_permission(user, Permissions.MANAGE_TAX_BRACKETS, economy=economy):
             raise BackendError("You do not have permission to trigger taxes in this economy")
         
-        wealth_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.WEALTH).where(Tax.economy_id==economy.economy_id).order_by(Tax.bracket_start.desc())).all()
+        wealth_taxes = self.session.execute(
+            select(Tax)
+            .where(
+                Tax.tax_type==TaxType.WEALTH,
+                Tax.economy_id==economy.economy_id
+            ).order_by(Tax.bracket_start.desc())
+        ).scalars()
         
         for wealth_tax in wealth_taxes:
-            wealth_tax = wealth_tax[0]
+            print(wealth_tax.tax_name, wealth_tax.bracket_start, wealth_tax.bracket_end)
             
             accumulated_tax = 0
             full_tax = ((wealth_tax.bracket_end - wealth_tax.bracket_start)*wealth_tax.rate)//100
@@ -640,21 +669,27 @@ class Backend:
             accum = self._one_or_none(
                                 select(func.sum(((Account.balance-wealth_tax.bracket_start)*wealth_tax.rate)//100))
                                 .select_from(Account)
-                                .where(Account.account_type==wealth_tax.affected_type)
-                                .where(Account.balance >= wealth_tax.bracket_start)
-                                .where(Account.balance < wealth_tax.bracket_end))
+                                .where(
+                                    Account.account_type == wealth_tax.affected_type,
+                                    Account.balance >= wealth_tax.bracket_start,
+                                    Account.balance < wealth_tax.bracket_end
+                                ))
+
+            print(accum)
 
             accumulated_tax += accum if accum is not None else 0
             self.session.execute(update(Account)
-                .where(Account.account_type == wealth_tax.affected_type)
-                .where(Account.balance >= wealth_tax.bracket_start)
-                .where(Account.balance < wealth_tax.bracket_end)
+                .where(
+                    Account.account_type == wealth_tax.affected_type,
+                    Account.balance >= wealth_tax.bracket_start,
+                    Account.balance < wealth_tax.bracket_end
+                )
                 .values(balance=Account.balance-(((Account.balance-wealth_tax.bracket_start)*wealth_tax.rate)//100))
             )
 
-            accum = self._one_or_none(select(func.count()).select_from(Account).where(Account.account_type == wealth_tax.affected_type).where(Account.balance >= wealth_tax.bracket_end))
-            accumulated_tax += (accum if accum is not None else 0)*full_tax
-            self.session.execute(update(Account).where(Account.account_type == wealth_tax.affected_type).where(Account.balance >= wealth_tax.bracket_end).values(balance=(Account.balance - full_tax)))
+            # accum = self._one_or_none(select(func.count()).select_from(Account).where(Account.account_type == wealth_tax.affected_type).where(Account.balance >= wealth_tax.bracket_end))
+            # accumulated_tax += (accum if accum is not None else 0)*full_tax
+            # self.session.execute(update(Account).where(Account.account_type == wealth_tax.affected_type).where(Account.balance >= wealth_tax.bracket_end).values(balance=(Account.balance - full_tax)))
             wealth_tax.to_account.balance += accumulated_tax
 
         income_taxes = self.session.execute(select(Tax).where(Tax.tax_type==TaxType.INCOME).where(Tax.economy_id == economy.economy_id).order_by(Tax.bracket_start.desc())).all()
@@ -857,7 +892,7 @@ class Backend:
             raise BackendError("You do not have permission to manage economies")
         
         if len(self.session.execute(select(Economy).where(Economy.owner_guild_id == guild_id)).all()) != 0:
-            raise BackendError("This guild is the owner guild of an economy, cannot change the economy its registered too")
+            raise BackendError("This guild is the owner guild of an economy, cannot change the economy its registered to")
         guild = self.session.get(Guild, guild_id)
         self.session.delete(guild)
         self.session.commit()
@@ -901,6 +936,8 @@ class Backend:
                 raise BackendError("You already have a user account")
         elif not self.has_permission(authorisor, Permissions.OPEN_SPECIAL_ACCOUNT, economy=economy):
             raise BackendError("You do not have permission to open special accounts")
+        elif name is not None and (acc := self.get_account_by_name(name, economy)) is not None:
+            raise BackendError(f"Account with name {name} already exists")
             
         account = Account(account_id=uuid4(), account_name=name, owner_id=owner_id, account_type=account_type, balance=0, economy=economy)
         self.session.add(account)
@@ -958,7 +995,7 @@ class Backend:
             raise BackendError("You do not have permission to close this account")
         acc_id = account.account_id
         econ_id = account.economy.economy_id
-        self.session.delete(account)
+        account.deleted = True
         self.session.add(Transaction(
             actor_id = authorisor.id,
             economy_id = econ_id,

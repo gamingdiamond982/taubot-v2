@@ -39,16 +39,12 @@ INSECURE = (
 backend: Backend = None
 
 
-
-
 class APIStubUser(StubUser):
     @classmethod
     def from_key(cls, key : APIKey):
         self = cls(key.key_id)
         self.mention = f"<@{key.issuer_id}>"
         return self
-
-
 
 
 def generate_key(key_id):
@@ -60,6 +56,7 @@ def generate_key(key_id):
     }
     return jwt.encode(claims, private_key, algorithm="RS512")
 
+
 async def get_actor(actor_id, economy):
     try:
         actor = await backend.get_member(actor_id, economy.owner_guild_id)
@@ -67,18 +64,23 @@ async def get_actor(actor_id, economy):
         actor = StubUser(actor_id)
     return actor
 
+
 def needs_discord(coro):
     async def result(request: Request, **kwargs):
         token = request.cookies.get('token')
         if token is None:
             raise web.HTTPFound('/api/oauth/login')
-        return await coro(request, discord_id = await get_user_id(token), **kwargs)
+        return await coro(
+            request,
+            discord_id=await get_user_id(token), 
+            **kwargs
+        )
     return result
 
 
 def needs(*types: KeyType):
     def decorator(coro):
-        async def result(request: Request, key: APIKey= None, **kwargs):
+        async def result(request: Request, key: APIKey = None, **kwargs):
             if key.type not in types:
                 raise web.HTTPUnauthorized()
             return await coro(request, key=key, **kwargs)

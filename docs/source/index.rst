@@ -3,10 +3,10 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Taubot V2 documentation
-=======================
+Index
+=====
 
-**Taubot** is a discord bot built for and by the `Sim Democracy <https://reddit.com/r/simdemocracy>`_ community.
+**Taubot** is a discord bot built for and by the `SimDemocracy <https://reddit.com/r/simdemocracy>`_ community.
 
 It's designed to realistically simulate an economy without alot of the unnecessary inflationary elements of other economy simulators.
 
@@ -16,7 +16,6 @@ Contents
 
 .. toctree::
    usage
-   internal
    api
 
 

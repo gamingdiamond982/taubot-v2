@@ -2,14 +2,15 @@
 API
 ===
 
-Taubot exposes a HTTPS API available at https://qwrky.dev/api/
-All data unless otherwise specified should be sent using json encoding.
+Taubot exposes a HTTPS API available at https://tau.work.gd/api/.
+
+All data unless otherwise specified should be sent using JSON encoding.
 
 
 Authentication
 --------------
 
-DM SoTec Stoner to get a master application key and it's associated application id.
+DM SoTech Lon to get a master application key and it's associated application ID.
 
 
 Types of keys:
@@ -21,13 +22,10 @@ Types of keys:
    * - Master Key
      - Grant Key
    * - Master keys are issued to applications, if requested they can be granted certain taubot permissions, but are notable for their ability to create GRANT keys
-     - Grant Keys are issued by a user to an application, it allows them to grant a subset of their taubot permissions to an application
+     - Grant keys are issued by a user to an application, it allows them to grant a subset of their taubot permissions to an application
 
 
 The key being used to make a request should be set as the :code:`authorization` HTTP header.
-
-
-
 
 
 Oauth-like flow overview
@@ -40,13 +38,13 @@ This section pretains to the distribution of Grant Keys to applications.
 
 The flow is as follows:
   
-  1. Application initiates proccess py posting a UUID identifier to :code:`/api/oauth-references`, and sends the user a link containing the UUID in a query string along with their application id
+  1. Application initiates proccess py posting a UUID identifier to :code:`/api/oauth-references`, and sends the user a link containing the UUID in a query string along with their application ID.
   
-  2. User clicks link and sets the grant scopes they wish to grant the API
+  2. User clicks link and sets the grant scopes they wish to grant to the API.
 
-  3. User returns to application and confirms that they've completed the grant process
+  3. User returns to application and confirms that they've completed the grant process.
 
-  4. Application gets :code:`/api/retrieve-key/{reference_id}` where reference id is the id they set in their post request, 
+  4. Application gets :code:`/api/retrieve-key/{reference_id}` where reference ID is the ID they set in their post request. 
 
 
 Starting the oauth-like flow
@@ -57,7 +55,7 @@ containing a UUID used to identify this particular flow.
 
 This UUID should be sent in the POST body json encoded with the key :code:`ref_id`.
 
-Afterwards a url should be sent to the User granting the application permissions, this same referencce id should be included in the querystring labelled :code:`ref_id`. the application id should also be sent in the querystring and labelled aid
+Afterwards, a URL should be sent to the user granting the application permissions. The same reference ID should be included in the querystring, labelled :code:`ref_id`. the application ID should also be sent in the querystring and labelled :code:`aid`.
 
 
 *Example Python Code using requests*
@@ -69,7 +67,7 @@ Afterwards a url should be sent to the User granting the application permissions
 
    # for obvious reasons these should be loaded from a config rather than hardcoded
    master_key: str = "master key goes here"
-   application_id: UUID = UUID("application id goes here")
+   application_id: UUID = UUID("application ID goes here")
 
    def get_auth_link(ref_id: UUID) -> str:
        resp = requests.post(
@@ -83,7 +81,7 @@ Afterwards a url should be sent to the User granting the application permissions
        return f"https://qwrky.dev/api/oauth/grant?ref={str(ref_id)}&aid={str(application_id)}"
 
 
-Once the user has completed the grant process they should inform the application somehow and the application can then retrieve their token
+Once the user has completed the grant process, they should inform the application somehow so that the application can then retrieve their token.
 
 
 Retrieving a token
@@ -106,7 +104,7 @@ This key will have the same permissions the user set.
 
    # for obvious reasons these should be loaded from a config rather than hardcoded
    master_key: str = "master key goes here"
-   application_id: UUID = UUID("application id goes here")
+   application_id: UUID = UUID("application ID goes here")
 
    def retrieve_key(ref_id: UUID) -> str:
       # since UUIDs are urlsafe this is fine
@@ -119,7 +117,7 @@ This key will have the same permissions the user set.
       return resp.json()["key"]
 
 
-This token should be persisted somewhere, and used to make requests on behalf of the issuer
+This token should be persisted somewhere, and used to make requests on behalf of the issuer.
 
 API Reference
 -------------
@@ -238,9 +236,9 @@ Here's an overview of all the requests you can currently make to the API.
 
    :query limit: optional limit paramater, specifies the maximum number of transactions to return
    
-   :statuscode 200: Returns a json list of Transaction objects
+   :statuscode 200: Returns a JSON list of Transaction objects
    :statuscode 404: The account specified could not be found
-   :statuscode 401: You do not have the necessary permissions (VIEW_BALANCE) to view the transaciton log
+   :statuscode 401: You do not have the necessary permissions (:code:`VIEW_BALANCE`) to view the transaction log
 
 
 .. http:post:: /api/transactions/
@@ -252,49 +250,5 @@ Here's an overview of all the requests you can currently make to the API.
    :jsonparam int amount: The amount in cents to transfer
 
    :statuscode 200: Transaction was created sucessfully
-   :statuscode 404: one of the accounts could not be found
-   :statuscode 401: Your key doesn't grant you sufficient permissions to make this transaction.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+   :statuscode 404: One of the accounts could not be found
+   :statuscode 401: Your key doesn't grant you sufficient permissions to make this transaction

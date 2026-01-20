@@ -1,6 +1,5 @@
 sphinx
 sphinx-autobuild
-
 pydata-sphinx-theme
-
 sphinxcontrib-httpdomain
+sphinxext-opengraph

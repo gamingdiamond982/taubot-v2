@@ -16,6 +16,7 @@ from discord import app_commands
 from discord import Webhook
 
 import discord
+import io
 from discord import Colour
 import api
 
@@ -28,6 +29,8 @@ green = Colour.green
 init_time = datetime.datetime.now()
 syncing = False
 use_api = False
+
+private_webhook_url = ""
 
 discord_id_regex = re.compile(r'^<@!?[0-9]*>$')  # a regex that matches a discord id
 
@@ -87,10 +90,17 @@ class WebhookHandler(logging.Handler):
             await wh.send(*args, **kwargs)
 
     def emit(self, record: logging.LogRecord):
+        print(record.levelno)
         embed = discord.Embed(colour=blue())
         embed.add_field(name=record.name, value=record.message, inline=False)
         asyncio.get_event_loop().create_task(self.send(embed=embed))
 
+class LevelFilter(logging.Filter):
+    def __init__(self, level):
+        self.level = level
+
+    def filter(self, record):
+        return record.levelno == self.level
 
 # discord rate limits global command updates so for testing purposes I'm only updating the test server I've created
 test_guild = None # discord.Object(id=1236137485554155612)  # Change to None for deployment
@@ -183,17 +193,42 @@ def parse_amount(amount: str) -> int:
         raise ParseException("Invalid currency value")
 
 
-bot = commands.Bot(intents=intents, help_command=None, command_prefix='!')
+class CommandCheck(discord.app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.type == discord.InteractionType.application_command and not interaction.guild:
+            await interaction.response.send_message(embed=create_embed("Running commands in DMs is not supported", "This restriction has been placed for safety reasons until further notice.", discord.Colour.red()))
+            return False
+        return True
 
+bot = commands.Bot(intents=intents, help_command=None, command_prefix='!', tree_cls=CommandCheck)
 
 @tasks.loop(time=tick_time)
 async def tick():
     await backend.tick()
+    await dump(True)
 
+async def dump(automatic=False):
+    if backend is not None:
+        conn = backend.engine.raw_connection()
+        with io.StringIO() as buf, io.StringIO() as buf2, io.StringIO() as buf3:
+            for line in conn.iterdump():
+                buf.write("%s\n" % line)
+            buf.seek(0)
 
+            dump_f = discord.File(buf, filename="dump.sql")
+            accounts_f = discord.File(backend.dump_accounts_csv(buf2), filename="accounts.csv")
+            trans_f = discord.File(backend.dump_transactions_csv(buf3), filename="transactions.csv")
+
+            if private_webhook_url and len(private_webhook_url) > 0:
+                timestamp = int(datetime.datetime.now().timestamp())
+                await Webhook.from_url(private_webhook_url, client=bot).send(
+                    content=f"Database dump, triggered {'manually' if not automatic else 'automatically'} at <t:{timestamp}>",
+                    files=[dump_f, accounts_f, trans_f]
+                )
+                
 @bot.event
 async def on_ready():
-    await backend.tick()
+    tick.start()
     if syncing:
         sync = await bot.tree.sync(guild=test_guild)
         print(f'Synced {len(sync)} command(s)')
@@ -206,7 +241,6 @@ async def on_ready():
         await site.start()
         print("Successfully started the api")
     print("Successfully started bot")
-
 
 @bot.tree.command(name="ping", description="ping the bot to check if it's online", guild=test_guild)
 @app_commands.describe(isalive="Give a simpler response to only check if we can talk to discord, useful if DB is really broken")
@@ -287,9 +321,27 @@ async def join_economy(interaction: discord.Interaction, economy_name: str):
     if economy is None:
         await responder(message='That economy could not be found, try creating it with `/create_economy`', colour=red())
         return
-    backend.register_guild(interaction.user, interaction.guild.id, economy)
-    await responder(message=f'Successfully joined economy: {economy_name}')
 
+    try:
+        backend.register_guild(interaction.user, interaction.guild.id, economy)
+        await responder(message=f'Successfully joined economy: {economy_name}')
+    except BackendError as e:
+        await responder(message=f"Could not join economy {economy_name}: {e}", colour=red())
+
+@bot.tree.command(name='leave_economy', description="removes this guild's membership from the current economy",
+                  guild=test_guild)
+async def leave_economy(interaction: discord.Interaction):
+    responder = backend.get_responder(interaction)
+    economy = backend.get_guild_economy(interaction.guild.id)
+    if economy is None:
+        await responder(message='This guild is not a member of an economy', colour=red())
+        return
+    
+    try:
+        backend.unregister_guild(interaction.user, interaction.guild.id)
+        await responder(message=f'Successfully left economy: {economy.currency_name}')
+    except BackendError as e:
+        await responder(message=f"Could not leave economy {economy.currency_name}: {e}", colour=red())
 
 @bot.tree.command(name='delete_economy', description="Deletes an economy", guild=test_guild)
 @app_commands.describe(economy_name='The name of the economy')
@@ -451,7 +503,7 @@ async def close_account(interaction: discord.Interaction, account_name: str | No
 async def get_balance(interaction: discord.Interaction):
     responder = backend.get_responder(interaction)
     economy = backend.get_guild_economy(interaction.guild.id)
-    print(economy.economy_id)
+
     if economy is None:
         await responder(message='This guild is not registered to an economy', colour=red())
         return
@@ -759,10 +811,8 @@ async def unsubscribe(interaction: discord.Interaction, account: str):
 def setup_webhook(l, webhook_url, level):
     wh = WebhookHandler(webhook_url)
     wh.setLevel(level)
+    wh.addFilter(LevelFilter(level))
     l.addHandler(wh)
-
-
-
 
 if __name__ == '__main__':
     config = load_config()
@@ -774,12 +824,13 @@ if __name__ == '__main__':
         logger.log(logging.CRITICAL, "Discord token not found in the config file")
         sys.exit(1)
 
-    use_api = bool(config.get('api'))
-
     public_webhook_url = config.get('public_webhook_url')
     private_webhook_url = config.get('private_webhook_url')
 
+    use_api = bool(config.get('api'))
+
     if public_webhook_url:
+        print(public_webhook_url)
         setup_webhook(backend_logger, public_webhook_url, 52)
 
     if private_webhook_url:
